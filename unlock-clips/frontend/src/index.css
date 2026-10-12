@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+
+  /* Identidade UNLOCK CLIPS: verde-limão elétrico sobre grafite profundo. */
+  --color-brand-200: #e6fbb0;
+  --color-brand-300: #d6f77c;
+  --color-brand-400: #c4f34a;
+  --color-brand-500: #a9dc23;
+  --color-brand-600: #84ad12;
+  --color-brand-950: #1b2405;
+
+  --color-ink-950: #07070b;
+  --color-ink-900: #0c0c13;
+  --color-ink-850: #11111a;
+  --color-ink-800: #171722;
+  --color-ink-700: #22222f;
+  --color-ink-600: #31313f;
+  --color-ink-500: #4a4a5c;
+
+  --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
+
+  @keyframes indeterminate {
+    0% {
+      left: -35%;
+    }
+    100% {
+      left: 100%;
+    }
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 font-sans text-zinc-100 antialiased;
+  }
+
+  ::selection {
+    @apply bg-brand-400 text-ink-950;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-400;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-ink-700 bg-ink-900/80;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 transition focus:border-brand-400 focus:outline-none disabled:opacity-50;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium tracking-wide text-zinc-400 uppercase;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-brand-400 text-ink-950 hover:bg-brand-300;
+  }
+
+  .btn-secondary {
+    @apply border border-ink-600 bg-ink-800 text-zinc-100 hover:border-ink-500 hover:bg-ink-700;
+  }
+
+  .btn-danger {
+    @apply border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20;
+  }
+
+  .btn-ghost {
+    @apply px-2 text-zinc-400 hover:bg-ink-800 hover:text-zinc-100;
+  }
+}

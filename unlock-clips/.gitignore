@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Dados locais (projetos, vídeos enviados e exportações)
+backend/data/
+
+# Front-end
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -1,0 +1,4 @@
+# Dependências de execução do back-end UNLOCK CLIPS (Etapa 1)
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30
+httpx>=0.27,<1
