@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DurationPreset = Literal["15-30", "30-60", "60-90"]
 AspectRatio = Literal["9:16", "1:1", "16:9"]
@@ -17,14 +17,16 @@ SubtitleStyle = Literal["classico", "destaque", "caixa", "minimalista"]
 SubtitlePosition = Literal["inferior", "centro", "superior"]
 FramingMode = Literal["centro", "rosto"]
 
-JobKind = Literal["validate", "import_link"]
+# "validate" é mantido para ler projetos criados na Etapa 1.
+JobKind = Literal["process", "import_link", "validate"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled", "interrupted"]
 ACTIVE_JOB_STATUSES: frozenset[str] = frozenset({"queued", "running"})
 
 ProjectStatus = Literal[
     "importing",  # baixando o vídeo a partir de um link
     "validating",  # verificando o arquivo recebido
-    "ready",  # arquivo verificado, pronto para as próximas etapas
+    "extracting_audio",  # lendo a mídia com FFprobe e extraindo o áudio com FFmpeg
+    "ready",  # áudio extraído, pronto para as próximas etapas
     "failed",
     "cancelled",
     "interrupted",  # a aplicação foi fechada durante uma tarefa
@@ -92,6 +94,16 @@ class AppSettings(BaseModel):
     clip_defaults: ClipSettings = Field(default_factory=ClipSettings)
     allowed_link_domains: list[str] = Field(default_factory=list, max_length=200)
     max_upload_size_mb: int = Field(default=8192, ge=1, le=102_400)
+    # Pasta com ffmpeg(.exe) e ffprobe(.exe). Vazio = procurar no PATH do sistema.
+    ffmpeg_dir: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("ffmpeg_dir")
+    @classmethod
+    def _strip_ffmpeg_dir(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip().strip('"').strip()
+        return value or None
 
     @field_validator("allowed_link_domains")
     @classmethod
@@ -139,6 +151,59 @@ class SourceInfo(BaseModel):
     sha256: str | None = None
 
 
+class VideoStreamInfo(BaseModel):
+    index: int
+    codec: str
+    width: int
+    height: int
+    fps: float | None = None
+    rotation: int = 0
+
+    @property
+    def display_size(self) -> tuple[int, int]:
+        """Dimensões como o vídeo aparece na tela (considerando rotação)."""
+        if abs(self.rotation) % 180 == 90:
+            return self.height, self.width
+        return self.width, self.height
+
+
+class AudioStreamInfo(BaseModel):
+    index: int
+    codec: str
+    sample_rate: int | None = None
+    channels: int | None = None
+    language: str | None = None
+    default: bool = False
+
+
+class MediaInfo(BaseModel):
+    """Resultado do FFprobe sobre o vídeo original."""
+
+    duration_seconds: float
+    format_name: str
+    bit_rate: int | None = None
+    video: VideoStreamInfo | None = None
+    audio_streams: list[AudioStreamInfo] = Field(default_factory=list)
+
+    def preferred_audio(self) -> AudioStreamInfo | None:
+        for stream in self.audio_streams:
+            if stream.default:
+                return stream
+        return self.audio_streams[0] if self.audio_streams else None
+
+
+class AudioInfo(BaseModel):
+    """Áudio extraído para transcrição: WAV PCM 16 bits, mono, 16 kHz."""
+
+    filename: str
+    source_stream_index: int
+    codec: str = "pcm_s16le"
+    sample_rate: int = 16_000
+    channels: int = 1
+    duration_seconds: float
+    size_bytes: int
+
+
 class Project(BaseModel):
     schema_version: int = SCHEMA_VERSION
     id: str = Field(default_factory=new_id)
@@ -148,6 +213,9 @@ class Project(BaseModel):
     status: ProjectStatus
     source: SourceInfo
     settings: ClipSettings = Field(default_factory=ClipSettings)
+    media: MediaInfo | None = None
+    audio: AudioInfo | None = None
+    thumbnail: str | None = None
     job: JobInfo | None = None
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
@@ -201,4 +269,8 @@ class HealthInfo(BaseModel):
     version: str
     ffmpeg_available: bool
     ffprobe_available: bool
+    ffmpeg_path: str | None = None
+    ffprobe_path: str | None = None
+    ffmpeg_version: str | None = None
+    ffmpeg_error: str | None = None
     data_dir: str

@@ -90,6 +90,19 @@ def stream_source(project_id: str, service: Service) -> FileResponse:
     return FileResponse(path, content_disposition_type="inline", filename=path.name)
 
 
+@router.get("/{project_id}/audio")
+def stream_audio(project_id: str, service: Service) -> FileResponse:
+    """Áudio extraído (WAV mono 16 kHz), com suporte a Range para o player."""
+    path = service.audio_path(project_id)
+    return FileResponse(path, media_type="audio/wav", content_disposition_type="inline", filename=path.name)
+
+
+@router.get("/{project_id}/thumbnail")
+def thumbnail(project_id: str, service: Service) -> FileResponse:
+    path = service.thumbnail_path(project_id)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/{project_id}/exports/{filename}")
 def download_export(project_id: str, filename: str, service: Service) -> FileResponse:
     path = service.export_path(project_id, filename)

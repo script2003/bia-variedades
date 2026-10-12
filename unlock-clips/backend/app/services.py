@@ -13,6 +13,16 @@ from pathlib import Path
 import anyio
 
 from .config import AppConfig
+from .ffmpeg import (
+    AUDIO_FILENAME,
+    THUMBNAIL_FILENAME,
+    MediaError,
+    extract_audio,
+    find_tools,
+    make_thumbnail,
+    probe,
+    require_processable,
+)
 from .jobs import JobContext, JobManager
 from .links import (
     ClientFactory,
@@ -57,8 +67,11 @@ logger = logging.getLogger(__name__)
 INTERRUPTED_MESSAGE = (
     "A aplicação foi encerrada antes de concluir esta tarefa. Clique em “Tentar novamente” para retomar."
 )
-# Parcela do progresso da importação por link dedicada ao download (o restante é a verificação).
-DOWNLOAD_PROGRESS_SHARE = 0.85
+# Parcela do progresso da importação por link dedicada ao download (o restante é o processamento).
+DOWNLOAD_PROGRESS_SHARE = 0.6
+# Divisão do progresso do processamento: verificação, leitura da mídia + miniatura e extração de áudio.
+VERIFY_SHARE = 0.2
+PROBE_SHARE = 0.05
 
 
 class ServiceError(Exception):
@@ -104,6 +117,20 @@ class ProjectService:
 
     def list(self) -> list[Project]:
         return self.store.list()
+
+    def audio_path(self, project_id: str) -> Path:
+        project = self.get(project_id)
+        path = self.store.project_dir(project_id) / project.audio.filename if project.audio else None
+        if path is None or not path.is_file():
+            raise ServiceError(404, "O áudio deste projeto ainda não foi extraído.")
+        return path
+
+    def thumbnail_path(self, project_id: str) -> Path:
+        project = self.get(project_id)
+        path = self.store.project_dir(project_id) / project.thumbnail if project.thumbnail else None
+        if path is None or not path.is_file():
+            raise ServiceError(404, "Miniatura indisponível.")
+        return path
 
     def source_path(self, project_id: str) -> Path:
         project = self.get(project_id)
@@ -242,7 +269,7 @@ class ProjectService:
             if project is not None and self.store.exists(project.id):
                 shutil.rmtree(self.store.project_dir(project.id), ignore_errors=True)
             raise
-        return self._start_job(project.id, "validate", "validating", self._validation_task(project.id))
+        return self._start_job(project.id, "process", "validating", self._process_task(project.id))
 
     def create_from_link(self, request: LinkImportRequest) -> Project:
         if not request.rights_confirmed:
@@ -285,16 +312,21 @@ class ProjectService:
         return self.get(project_id)
 
     def retry(self, project_id: str) -> Project:
+        """Reinicia o processamento após erro, cancelamento ou interrupção.
+
+        Também processa projetos criados na Etapa 1, que estão prontos mas ainda sem áudio extraído.
+        """
         project = self.get(project_id)
         if project.job is not None and self.jobs.is_active(project.job.id):
             raise ServiceError(409, "Já existe uma tarefa em andamento neste projeto.")
-        if project.status not in ("failed", "cancelled", "interrupted"):
+        needs_audio = project.status == "ready" and project.audio is None
+        if project.status not in ("failed", "cancelled", "interrupted") and not needs_audio:
             raise ServiceError(409, "Este projeto não precisa ser reprocessado.")
         source_file = (
             self.store.project_dir(project_id) / project.source.filename if project.source.filename else None
         )
         if source_file is not None and source_file.is_file():
-            return self._start_job(project_id, "validate", "validating", self._validation_task(project_id))
+            return self._start_job(project_id, "process", "validating", self._process_task(project_id))
         if project.source.kind == "link" and project.source.url:
             return self._start_job(project_id, "import_link", "importing", self._link_task(project_id))
         raise ServiceError(409, "O arquivo original não existe mais. Crie um novo projeto enviando o vídeo novamente.")
@@ -316,7 +348,8 @@ class ProjectService:
 
     def recover_after_restart(self) -> int:
         """Marca como interrompidas as tarefas que estavam ativas quando a aplicação foi fechada."""
-        for leftover in self.config.tmp_dir.glob("*.part"):
+        leftovers = [*self.config.tmp_dir.glob("*.part"), *self.config.projects_dir.glob("*/*.part.*")]
+        for leftover in leftovers:
             try:
                 leftover.unlink()
             except OSError:
@@ -363,9 +396,9 @@ class ProjectService:
         self.jobs.submit(job.id, task)
         return project
 
-    def _validation_task(self, project_id: str):
+    def _process_task(self, project_id: str):
         def task(ctx: JobContext) -> None:
-            self._verify_source(ctx, project_id, 0.0, 1.0)
+            self._process_source(ctx, project_id, 0.0, 1.0)
 
         return task
 
@@ -400,9 +433,48 @@ class ProjectService:
                 p.source.container = result.container
 
             self.store.update(project_id, mutate)
-            self._verify_source(ctx, project_id, DOWNLOAD_PROGRESS_SHARE, 1.0)
+            self._process_source(ctx, project_id, DOWNLOAD_PROGRESS_SHARE, 1.0)
 
         return task
+
+    def _process_source(self, ctx: JobContext, project_id: str, start: float, end: float) -> None:
+        """Verifica o arquivo, lê a mídia com FFprobe, gera a miniatura e extrai o áudio."""
+        # Localiza o FFmpeg antes de tudo para falhar rápido, sem reler arquivos grandes à toa.
+        tools = find_tools(self.settings_store.get().ffmpeg_dir)
+        span = end - start
+        verify_end = start + span * VERIFY_SHARE
+        probe_end = verify_end + span * PROBE_SHARE
+        self._verify_source(ctx, project_id, start, verify_end)
+
+        def set_extracting(p: Project) -> None:
+            p.status = "extracting_audio"
+            p.media = None
+            p.audio = None
+
+        project = self.store.update(project_id, set_extracting)
+        assert project.source.filename is not None
+        folder = self.store.project_dir(project_id)
+        source = folder / project.source.filename
+
+        ctx.progress(verify_end, "Lendo informações do vídeo (FFprobe)", force=True)
+        media = probe(tools, source)
+        # Salva as informações antes de validar, para a interface mostrar o que foi lido mesmo em caso de erro.
+        self.store.update(project_id, lambda p: setattr(p, "media", media))
+        require_processable(media)
+
+        thumbnail: str | None = None
+        try:
+            make_thumbnail(ctx, tools, source, folder / THUMBNAIL_FILENAME, media)
+            thumbnail = THUMBNAIL_FILENAME
+        except MediaError as exc:
+            # A miniatura é apenas visual; a falha não impede o processamento.
+            logger.warning("Miniatura não gerada para %s: %s", project_id, exc)
+        self.store.update(project_id, lambda p: setattr(p, "thumbnail", thumbnail))
+
+        audio = extract_audio(
+            ctx, tools, source, folder / AUDIO_FILENAME, media, progress_start=probe_end, progress_end=end
+        )
+        self.store.update(project_id, lambda p: setattr(p, "audio", audio))
 
     def _verify_source(self, ctx: JobContext, project_id: str, start: float, end: float) -> None:
         project = self.store.get(project_id)

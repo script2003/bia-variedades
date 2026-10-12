@@ -15,23 +15,35 @@ interface Step {
  * como "disponível em breve" — nunca como concluídas.
  */
 export function buildSteps(project: Project): Step[] {
-  const importing = project.status === "importing";
-  const validating = project.status === "validating";
-  const ready = project.status === "ready";
-  const problem = ["failed", "cancelled", "interrupted"].includes(project.status);
-  const hasFile = project.source.filename !== null && !importing;
+  const { status, source, media, audio } = project;
+  const importing = status === "importing";
+  const problem = ["failed", "cancelled", "interrupted"].includes(status);
+  const hasFile = source.filename !== null && !importing;
+  const verified = source.sha256 !== null && status !== "validating";
+  const extracting = status === "extracting_audio";
+
   const receivedState: StepState = hasFile ? "done" : importing ? "active" : problem ? "error" : "pending";
-  const verifyState: StepState = ready ? "done" : validating ? "active" : problem && hasFile ? "error" : "pending";
+  const verifyState: StepState =
+    status === "validating" ? "active" : verified ? "done" : problem && hasFile ? "error" : "pending";
+  const mediaState: StepState = media ? "done" : extracting ? "active" : problem && verified ? "error" : "pending";
+  const audioState: StepState = audio
+    ? "done"
+    : extracting && media
+      ? "active"
+      : problem && media
+        ? "error"
+        : "pending";
   const later = (title: string, description: string): Step => ({ title, description, state: "unavailable" });
 
   return [
     {
-      title: project.source.kind === "link" ? "Importação do link" : "Envio do arquivo",
+      title: source.kind === "link" ? "Importação do link" : "Envio do arquivo",
       description: hasFile ? "Vídeo armazenado localmente." : "Recebendo o vídeo.",
       state: receivedState,
     },
     { title: "Verificação do arquivo", description: "Formato, assinatura do contêiner e integridade (SHA-256).", state: verifyState },
-    later("Extração de áudio", "FFmpeg — chega na Etapa 2."),
+    { title: "Leitura da mídia", description: "Duração, trilhas e codecs com FFprobe.", state: mediaState },
+    { title: "Extração de áudio", description: "WAV mono 16 kHz com FFmpeg, pronto para transcrição.", state: audioState },
     later("Transcrição com timestamps", "faster-whisper local — Etapa 3."),
     later("Identificação de cortes", "Pontuação heurística explicável — Etapa 4."),
     later("Legendas e formato vertical", "Legendas sincronizadas e 9:16 — Etapa 5."),

@@ -9,7 +9,7 @@ from app.main import create_app
 from app.schemas import JobInfo, Project, SourceInfo
 from app.storage import ProjectStore
 
-from .conftest import MKV_HEADER, fake_video, upload, wait_for_status
+from .conftest import fake_video, upload, wait_for_status
 
 
 def allow_domains(client: TestClient, *domains: str) -> None:
@@ -49,15 +49,15 @@ def test_settings_roundtrip_and_validation(client):
 # ----------------------------------------------------------------- upload
 
 
-def test_upload_validates_and_becomes_ready(client):
-    data = fake_video(400_000)
+def test_upload_validates_and_becomes_ready(client, real_video):
+    data = real_video
     response = upload(client, data, filename=r"C:\fakepath\Podcast Ep 1.mp4")
     assert response.status_code == 201, response.text
     project = response.json()
     assert project["title"] == "Podcast Ep 1"
     assert project["source"]["original_name"] == "Podcast Ep 1.mp4"
     assert project["source"]["filename"] == "source.mp4"
-    assert project["job"]["kind"] == "validate"
+    assert project["job"]["kind"] == "process"
 
     project = wait_for_status(client, project["id"], {"ready", "failed"})
     assert project["status"] == "ready", project
@@ -98,15 +98,16 @@ def test_upload_rejections(client, config):
     assert list(config.tmp_dir.iterdir()) == []
 
 
-def test_upload_extension_mismatch_warns(client):
-    project = upload(client, fake_video(header=MKV_HEADER), filename="gravacao.mp4").json()
+def test_upload_extension_mismatch_warns(client, media_dir):
+    mkv = (media_dir / "sample.mkv").read_bytes()
+    project = upload(client, mkv, filename="gravacao.mp4").json()
     assert project["source"]["filename"] == "source.mkv"
     project = wait_for_status(client, project["id"], {"ready"})
     assert any("não corresponde" in w for w in project["warnings"])
 
 
-def test_duplicate_upload_warns(client):
-    data = fake_video(100_000)
+def test_duplicate_upload_warns(client, real_video):
+    data = real_video
     first = upload(client, data, title="Original").json()
     wait_for_status(client, first["id"], {"ready"})
     second = upload(client, data, title="Cópia").json()
@@ -114,8 +115,8 @@ def test_duplicate_upload_warns(client):
     assert any("Original" in w for w in second["warnings"])
 
 
-def test_source_streaming_supports_range(client):
-    data = fake_video(100_000)
+def test_source_streaming_supports_range(client, real_video):
+    data = real_video
     project = upload(client, data).json()
     wait_for_status(client, project["id"], {"ready"})
     full = client.get(f"/api/projects/{project['id']}/source")
@@ -129,8 +130,8 @@ def test_source_streaming_supports_range(client):
 # ----------------------------------------------------------------- edição e exclusão
 
 
-def test_update_and_delete_project(client, config):
-    project = upload(client, fake_video()).json()
+def test_update_and_delete_project(client, config, real_video):
+    project = upload(client, real_video).json()
     wait_for_status(client, project["id"], {"ready"})
     updated = client.patch(
         f"/api/projects/{project['id']}",
@@ -159,8 +160,8 @@ def test_unknown_and_malicious_ids(client):
 # ----------------------------------------------------------------- links
 
 
-def test_link_import_end_to_end(client, mock_source):
-    data = fake_video(300_000)
+def test_link_import_end_to_end(client, mock_source, real_video):
+    data = real_video
     mock_source.handler = lambda r: httpx.Response(200, headers={"content-type": "video/mp4"}, content=data)
     allow_domains(client, "exemplo.com")
     response = client.post(
@@ -191,7 +192,7 @@ def test_link_import_policy(client):
     assert client.get("/api/projects").json() == []
 
 
-def test_link_failure_then_retry(client, mock_source):
+def test_link_failure_then_retry(client, mock_source, real_video):
     allow_domains(client, "exemplo.com")
     mock_source.handler = lambda r: httpx.Response(200, headers={"content-type": "text/html"}, content=b"<html>")
     project = client.post(
@@ -200,7 +201,7 @@ def test_link_failure_then_retry(client, mock_source):
     project = wait_for_status(client, project["id"], {"failed"})
     assert "página web" in project["error"]
 
-    mock_source.handler = lambda r: httpx.Response(200, headers={"content-type": "video/mp4"}, content=fake_video())
+    mock_source.handler = lambda r: httpx.Response(200, headers={"content-type": "video/mp4"}, content=real_video)
     retried = client.post(f"/api/projects/{project['id']}/retry")
     assert retried.status_code == 200
     project = wait_for_status(client, project["id"], {"ready"})
@@ -236,7 +237,7 @@ def test_cancel_link_download(client, mock_source, config):
 # ----------------------------------------------------------------- persistência
 
 
-def test_restart_marks_interrupted_and_retry_resumes(config, mock_source):
+def test_restart_marks_interrupted_and_retry_resumes(config, mock_source, real_video):
     config.ensure_dirs()
     store = ProjectStore(config.projects_dir)
     project = Project(
@@ -246,7 +247,7 @@ def test_restart_marks_interrupted_and_retry_resumes(config, mock_source):
         job=JobInfo(kind="validate", status="running", progress=0.4),
     )
     store.create(project)
-    (store.project_dir(project.id) / "source.mp4").write_bytes(fake_video())
+    (store.project_dir(project.id) / "source.mp4").write_bytes(real_video)
     (config.tmp_dir / "lixo.part").write_bytes(b"123")
 
     with TestClient(create_app(config, client_factory=mock_source.factory)) as client:
@@ -266,8 +267,8 @@ def test_restart_marks_interrupted_and_retry_resumes(config, mock_source):
         assert projects[0]["status"] == "ready"
 
 
-def test_exports_listing_and_download(client, config):
-    project = upload(client, fake_video()).json()
+def test_exports_listing_and_download(client, config, real_video):
+    project = upload(client, real_video).json()
     wait_for_status(client, project["id"], {"ready"})
     exports_dir = config.projects_dir / project["id"] / "exports"
     exports_dir.mkdir()
@@ -296,3 +297,97 @@ def test_serves_built_frontend(config, mock_source, tmp_path):
         assert client.get("/assets/app.js").text == "console.log(1)"
         assert client.get("/api/inexistente").status_code == 404
         assert client.get("/api/health").status_code == 200
+
+
+# ----------------------------------------------------------------- Etapa 2: FFmpeg
+
+
+def test_processing_extracts_media_audio_and_thumbnail(client, real_video):
+    import io
+    import wave
+
+    project = upload(client, real_video).json()
+    project = wait_for_status(client, project["id"], {"ready", "failed"})
+    assert project["status"] == "ready", project
+    media = project["media"]
+    assert 2.9 <= media["duration_seconds"] <= 3.2
+    assert (media["video"]["width"], media["video"]["height"]) == (160, 120)
+    assert media["audio_streams"][0]["channels"] == 2
+    audio = project["audio"]
+    assert (audio["sample_rate"], audio["channels"], audio["codec"]) == (16000, 1, "pcm_s16le")
+    assert project["thumbnail"] == "thumbnail.jpg"
+
+    wav_response = client.get(f"/api/projects/{project['id']}/audio")
+    assert wav_response.status_code == 200
+    assert wav_response.headers["content-type"] == "audio/wav"
+    with wave.open(io.BytesIO(wav_response.content)) as wav:
+        assert (wav.getnchannels(), wav.getframerate()) == (1, 16000)
+    assert client.get(f"/api/projects/{project['id']}/audio", headers={"Range": "bytes=0-43"}).status_code == 206
+
+    thumb = client.get(f"/api/projects/{project['id']}/thumbnail")
+    assert thumb.status_code == 200 and thumb.content[:2] == b"\xff\xd8"
+
+
+def test_video_without_audio_fails_with_clear_message(client, media_dir):
+    project = upload(client, (media_dir / "silent.mp4").read_bytes(), filename="sem-audio.mp4").json()
+    project = wait_for_status(client, project["id"], {"failed", "ready"})
+    assert project["status"] == "failed"
+    assert "não possui trilha de áudio" in project["error"]
+    assert project["audio"] is None
+    assert project["media"]["video"]["width"] == 160  # informações lidas continuam disponíveis
+    assert client.get(f"/api/projects/{project['id']}/audio").status_code == 404
+
+
+def test_audio_only_file_is_rejected(client, media_dir):
+    project = upload(client, (media_dir / "audio_only.mp4").read_bytes(), filename="so-audio.mp4").json()
+    project = wait_for_status(client, project["id"], {"failed", "ready"})
+    assert "trilha de vídeo" in project["error"]
+
+
+def test_missing_ffmpeg_fails_then_retry_after_fixing(client, real_video, tmp_path):
+    settings = client.get("/api/settings").json()
+    settings["ffmpeg_dir"] = str(tmp_path / "sem-ffmpeg")
+    assert client.put("/api/settings", json=settings).json()["ffmpeg_dir"] == str(tmp_path / "sem-ffmpeg")
+    health = client.get("/api/health").json()
+    assert health["ffmpeg_available"] is False and "pasta configurada" in health["ffmpeg_error"]
+
+    project = upload(client, real_video).json()
+    project = wait_for_status(client, project["id"], {"failed", "ready"})
+    assert project["status"] == "failed"
+    assert "não foram encontrados" in project["error"]
+    assert project["source"]["sha256"] is None  # falhou antes de reler o arquivo
+
+    settings["ffmpeg_dir"] = "   "
+    assert client.put("/api/settings", json=settings).json()["ffmpeg_dir"] is None
+    assert client.post(f"/api/projects/{project['id']}/retry").status_code == 200
+    assert wait_for_status(client, project["id"], {"ready"})["audio"] is not None
+
+
+def test_health_reports_ffmpeg_version(client):
+    health = client.get("/api/health").json()
+    assert health["ffmpeg_available"] and health["ffprobe_available"]
+    assert health["ffmpeg_version"].startswith("ffmpeg version")
+    assert health["ffmpeg_path"] and health["ffmpeg_error"] is None
+
+
+def test_stage1_project_can_be_processed(config, mock_source, real_video):
+    """Projetos da Etapa 1 (prontos, sem áudio) podem ser processados pelo botão de retomada."""
+    config.ensure_dirs()
+    store = ProjectStore(config.projects_dir)
+    legacy = Project(
+        schema_version=1,
+        title="Etapa 1",
+        status="ready",
+        source=SourceInfo(kind="upload", original_name="a.mp4", filename="source.mp4", sha256="x" * 64),
+        job=JobInfo(kind="validate", status="completed", progress=1.0),
+    )
+    store.create(legacy)
+    (store.project_dir(legacy.id) / "source.mp4").write_bytes(real_video)
+
+    with TestClient(create_app(config, client_factory=mock_source.factory)) as client:
+        assert client.get(f"/api/projects/{legacy.id}").json()["job"]["kind"] == "validate"
+        assert client.post(f"/api/projects/{legacy.id}/retry").status_code == 200
+        project = wait_for_status(client, legacy.id, {"ready", "failed"})
+        assert project["status"] == "ready" and project["audio"] is not None
+        assert project["schema_version"] == 2
+        assert client.post(f"/api/projects/{legacy.id}/retry").status_code == 409

@@ -22,9 +22,10 @@ export interface AppSettings {
   clip_defaults: ClipSettings;
   allowed_link_domains: string[];
   max_upload_size_mb: number;
+  ffmpeg_dir: string | null;
 }
 
-export type JobKind = "validate" | "import_link";
+export type JobKind = "process" | "import_link" | "validate";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export interface JobInfo {
@@ -39,7 +40,14 @@ export interface JobInfo {
   finished_at: string | null;
 }
 
-export type ProjectStatus = "importing" | "validating" | "ready" | "failed" | "cancelled" | "interrupted";
+export type ProjectStatus =
+  | "importing"
+  | "validating"
+  | "extracting_audio"
+  | "ready"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
 
 export interface SourceInfo {
   kind: "upload" | "link";
@@ -52,6 +60,42 @@ export interface SourceInfo {
   sha256: string | null;
 }
 
+export interface VideoStreamInfo {
+  index: number;
+  codec: string;
+  width: number;
+  height: number;
+  fps: number | null;
+  rotation: number;
+}
+
+export interface AudioStreamInfo {
+  index: number;
+  codec: string;
+  sample_rate: number | null;
+  channels: number | null;
+  language: string | null;
+  default: boolean;
+}
+
+export interface MediaInfo {
+  duration_seconds: number;
+  format_name: string;
+  bit_rate: number | null;
+  video: VideoStreamInfo | null;
+  audio_streams: AudioStreamInfo[];
+}
+
+export interface AudioInfo {
+  filename: string;
+  source_stream_index: number;
+  codec: string;
+  sample_rate: number;
+  channels: number;
+  duration_seconds: number;
+  size_bytes: number;
+}
+
 export interface Project {
   schema_version: number;
   id: string;
@@ -61,6 +105,9 @@ export interface Project {
   status: ProjectStatus;
   source: SourceInfo;
   settings: ClipSettings;
+  media: MediaInfo | null;
+  audio: AudioInfo | null;
+  thumbnail: string | null;
   job: JobInfo | null;
   warnings: string[];
   error: string | null;
@@ -100,5 +147,9 @@ export interface HealthInfo {
   version: string;
   ffmpeg_available: boolean;
   ffprobe_available: boolean;
+  ffmpeg_path: string | null;
+  ffprobe_path: string | null;
+  ffmpeg_version: string | null;
+  ffmpeg_error: string | null;
   data_dir: string;
 }

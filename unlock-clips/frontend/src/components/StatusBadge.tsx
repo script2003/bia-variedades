@@ -4,6 +4,7 @@ import { PROJECT_STATUS_LABEL } from "../lib/format";
 const STYLES: Record<ProjectStatus, string> = {
   importing: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
   validating: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
+  extracting_audio: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
   ready: "bg-brand-400/15 text-brand-300 ring-brand-400/30",
   failed: "bg-red-500/15 text-red-300 ring-red-500/30",
   cancelled: "bg-zinc-500/15 text-zinc-300 ring-zinc-500/30",

@@ -27,7 +27,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .schemas import AppSettings, Project, utcnow
+from .schemas import SCHEMA_VERSION, AppSettings, Project, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ class ProjectStore:
         return self.project_dir(project_id) / PROJECT_FILE
 
     def _write(self, project: Project) -> None:
+        project.schema_version = SCHEMA_VERSION
         atomic_write_text(self._file(project.id), project.model_dump_json(indent=2))
 
     def create(self, project: Project) -> Project:

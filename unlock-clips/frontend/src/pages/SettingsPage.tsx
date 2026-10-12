@@ -13,6 +13,36 @@ export function parseDomains(text: string): string[] {
     .filter(Boolean);
 }
 
+function FFmpegStatus({ health }: { health: HealthInfo }) {
+  const ok = health.ffmpeg_available && health.ffprobe_available;
+  return (
+    <div className={`rounded-xl border p-4 text-sm ${ok ? "border-brand-400/30 bg-brand-400/5" : "border-amber-500/30 bg-amber-500/10"}`}>
+      <p className={`flex items-center gap-2 font-semibold ${ok ? "text-brand-300" : "text-amber-200"}`}>
+        {ok ? <CheckCircle2 className="size-4" aria-hidden /> : <XCircle className="size-4" aria-hidden />}
+        {ok ? "FFmpeg encontrado e funcionando" : "FFmpeg indisponível"}
+      </p>
+      {ok ? (
+        <dl className="mt-2 grid gap-1 text-xs text-zinc-400">
+          <div>
+            <dt className="inline text-zinc-500">Versão: </dt>
+            <dd className="inline">{health.ffmpeg_version}</dd>
+          </div>
+          <div>
+            <dt className="inline text-zinc-500">FFmpeg: </dt>
+            <dd className="inline font-mono break-all">{health.ffmpeg_path}</dd>
+          </div>
+          <div>
+            <dt className="inline text-zinc-500">FFprobe: </dt>
+            <dd className="inline font-mono break-all">{health.ffprobe_path}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-1 text-amber-100/80">{health.ffmpeg_error}</p>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [domainsText, setDomainsText] = useState("");
@@ -45,6 +75,8 @@ export default function SettingsPage() {
       setSettings(saved);
       setDomainsText(saved.allowed_link_domains.join("\n"));
       setMessage({ tone: "success", text: "Configurações salvas." });
+      // A pasta do FFmpeg pode ter mudado: verifica novamente.
+      setHealth(await api.health());
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -106,6 +138,29 @@ export default function SettingsPage() {
             </div>
           </section>
 
+          <section className="card grid gap-4 p-5 sm:p-6">
+            <div>
+              <h2 className="mb-1 text-lg font-semibold">FFmpeg</h2>
+              <p className="text-sm text-zinc-500">
+                Usado para ler o vídeo e extrair o áudio. Deixe em branco para usar o FFmpeg do PATH do sistema
+                (instalado com <code className="font-mono text-zinc-300">winget install -e --id Gyan.FFmpeg</code>), ou
+                informe a pasta que contém <code className="font-mono text-zinc-300">ffmpeg.exe</code> e{" "}
+                <code className="font-mono text-zinc-300">ffprobe.exe</code>.
+              </p>
+            </div>
+            <div>
+              <label className="label" htmlFor="ffmpeg-dir">Pasta do FFmpeg (opcional)</label>
+              <input
+                id="ffmpeg-dir"
+                className="input font-mono"
+                placeholder="C:\ffmpeg\bin"
+                value={settings.ffmpeg_dir ?? ""}
+                onChange={(e) => setSettings({ ...settings, ffmpeg_dir: e.target.value || null })}
+              />
+            </div>
+            {health && <FFmpegStatus health={health} />}
+          </section>
+
           {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
           <div className="flex justify-end">
@@ -129,18 +184,6 @@ export default function SettingsPage() {
               <dt className="text-zinc-500">Pasta de dados</dt>
               <dd className="font-mono text-xs break-all">{health.data_dir}</dd>
             </div>
-            {[
-              { label: "FFmpeg", ok: health.ffmpeg_available },
-              { label: "FFprobe", ok: health.ffprobe_available },
-            ].map(({ label, ok }) => (
-              <div key={label}>
-                <dt className="text-zinc-500">{label}</dt>
-                <dd className={`flex items-center gap-1.5 ${ok ? "text-brand-300" : "text-amber-300"}`}>
-                  {ok ? <CheckCircle2 className="size-4" aria-hidden /> : <XCircle className="size-4" aria-hidden />}
-                  {ok ? "Encontrado no PATH" : "Não encontrado — será necessário a partir da Etapa 2"}
-                </dd>
-              </div>
-            ))}
           </dl>
         </section>
       )}

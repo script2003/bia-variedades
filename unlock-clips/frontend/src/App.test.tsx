@@ -16,7 +16,17 @@ function setup(path = "/") {
       "GET /api/stats": () => ({ body: stats }),
       "GET /api/exports": () => ({ body: [] }),
       "GET /api/health": () => ({
-        body: { status: "ok", version: "0.1.0", ffmpeg_available: true, ffprobe_available: false, data_dir: "C:\\dados" },
+        body: {
+          status: "ok",
+          version: "0.2.0",
+          ffmpeg_available: false,
+          ffprobe_available: false,
+          ffmpeg_path: null,
+          ffprobe_path: null,
+          ffmpeg_version: null,
+          ffmpeg_error: "FFmpeg não foi encontrado. No Windows, instale com 'winget install -e --id Gyan.FFmpeg'",
+          data_dir: "C:\\dados",
+        },
       }),
     }).fn,
   );
@@ -52,7 +62,8 @@ describe("App", () => {
     expect(await screen.findByText("Nenhum vídeo exportado ainda")).toBeInTheDocument();
     await user.click(within(nav).getByRole("link", { name: "Configurações" }));
     expect(await screen.findByText("Links autorizados")).toBeInTheDocument();
-    expect(await screen.findByText(/Não encontrado — será necessário/)).toBeInTheDocument();
+    expect(await screen.findByText("FFmpeg indisponível")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pasta do FFmpeg (opcional)")).toHaveValue("");
   });
 
   it("exibe página 404 para rotas desconhecidas", () => {

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -19,6 +22,37 @@ AVI_HEADER = b"RIFF\x00\x00\x00\x00AVI LIST"
 def fake_video(size: int = 300_000, header: bytes = MP4_HEADER) -> bytes:
     filler = bytes(range(256)) * (size // 256 + 1)
     return (header + filler)[:size]
+
+
+HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+requires_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="FFmpeg/FFprobe não encontrados no PATH")
+
+
+def _generate(path: Path, *args: str) -> Path:
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args, str(path)]
+    subprocess.run(cmd, check=True, timeout=120)
+    return path
+
+
+@pytest.fixture(scope="session")
+def media_dir(tmp_path_factory) -> Path:
+    """Vídeos reais e pequenos gerados com o FFmpeg (codecs internos, sem dependências extras)."""
+    if not HAS_FFMPEG:
+        pytest.skip("FFmpeg/FFprobe não encontrados no PATH")
+    folder = tmp_path_factory.mktemp("media")
+    video = ["-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=3"]
+    audio = ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=3"]
+    _generate(folder / "sample.mp4", *video, *audio, "-c:v", "mpeg4", "-c:a", "aac", "-ac", "2", "-shortest")
+    _generate(folder / "sample.mkv", *video, *audio, "-c:v", "mpeg4", "-c:a", "aac", "-shortest")
+    _generate(folder / "silent.mp4", *video, "-c:v", "mpeg4")
+    _generate(folder / "audio_only.mp4", *audio, "-c:a", "aac")
+    return folder
+
+
+@pytest.fixture(scope="session")
+def real_video(media_dir) -> bytes:
+    """MP4 real de 3 s com vídeo 160x120 e áudio estéreo 44,1 kHz."""
+    return (media_dir / "sample.mp4").read_bytes()
 
 
 @pytest.fixture

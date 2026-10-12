@@ -1,29 +1,54 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { Project } from "../api/types";
 import { makeProject } from "../test/fixtures";
 import PipelineSteps, { buildSteps } from "./PipelineSteps";
 
+const states = (project: Project) => buildSteps(project).slice(0, 4).map((s) => s.state);
+const base = makeProject();
+
 describe("buildSteps", () => {
-  it("nunca marca como concluídas as etapas ainda não implementadas", () => {
-    const steps = buildSteps(makeProject({ status: "ready" }));
-    expect(steps.slice(0, 2).map((s) => s.state)).toEqual(["done", "done"]);
-    expect(steps.slice(2).every((s) => s.state === "unavailable")).toBe(true);
+  it("marca as quatro etapas implementadas como concluídas e nunca as futuras", () => {
+    const steps = buildSteps(base);
+    expect(states(base)).toEqual(["done", "done", "done", "done"]);
+    expect(steps.slice(4).every((s) => s.state === "unavailable")).toBe(true);
   });
 
-  it("reflete importação, verificação e falhas", () => {
-    const importing = makeProject({ status: "importing", source: { ...makeProject().source, kind: "link", filename: null } });
-    expect(buildSteps(importing).slice(0, 2).map((s) => s.state)).toEqual(["active", "pending"]);
-    expect(buildSteps(makeProject({ status: "validating" }))[1]!.state).toBe("active");
-    expect(buildSteps(makeProject({ status: "failed" }))[1]!.state).toBe("error");
-    const failedDownload = makeProject({ status: "failed", source: { ...makeProject().source, kind: "link", filename: null } });
-    expect(buildSteps(failedDownload)[0]!.state).toBe("error");
+  it("acompanha importação, verificação, leitura e extração", () => {
+    const importing = makeProject({
+      status: "importing",
+      source: { ...base.source, kind: "link", filename: null, sha256: null },
+      media: null,
+      audio: null,
+    });
+    expect(states(importing)).toEqual(["active", "pending", "pending", "pending"]);
+    const validating = makeProject({ status: "validating", media: null, audio: null });
+    expect(states(validating)).toEqual(["done", "active", "pending", "pending"]);
+    const probing = makeProject({ status: "extracting_audio", media: null, audio: null });
+    expect(states(probing)).toEqual(["done", "done", "active", "pending"]);
+    const extracting = makeProject({ status: "extracting_audio", audio: null });
+    expect(states(extracting)).toEqual(["done", "done", "done", "active"]);
+  });
+
+  it("aponta a etapa que falhou", () => {
+    expect(states(makeProject({ status: "failed", audio: null }))).toEqual(["done", "done", "done", "error"]);
+    expect(states(makeProject({ status: "failed", media: null, audio: null }))).toEqual(["done", "done", "error", "pending"]);
+    const badFile = makeProject({ status: "failed", source: { ...base.source, sha256: null }, media: null, audio: null });
+    expect(states(badFile)).toEqual(["done", "error", "pending", "pending"]);
+    const failedDownload = makeProject({
+      status: "failed",
+      source: { ...base.source, kind: "link", filename: null, sha256: null },
+      media: null,
+      audio: null,
+    });
+    expect(states(failedDownload)[0]).toBe("error");
   });
 });
 
 describe("PipelineSteps", () => {
   it("renderiza rótulos acessíveis", () => {
-    render(<PipelineSteps project={makeProject()} />);
-    expect(screen.getByLabelText("Verificação do arquivo: concluída")).toBeInTheDocument();
-    expect(screen.getByLabelText("Extração de áudio: disponível em breve")).toBeInTheDocument();
+    render(<PipelineSteps project={base} />);
+    expect(screen.getByLabelText("Extração de áudio: concluída")).toBeInTheDocument();
+    expect(screen.getByLabelText("Transcrição com timestamps: disponível em breve")).toBeInTheDocument();
   });
 });

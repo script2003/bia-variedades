@@ -8,6 +8,11 @@ export function canRetry(project: Project): boolean {
   return !hasActiveJob(project) && ["failed", "cancelled", "interrupted"].includes(project.status);
 }
 
+/** Projetos criados antes da Etapa 2: prontos, mas sem o áudio extraído. */
+export function needsAudioExtraction(project: Project): boolean {
+  return !hasActiveJob(project) && project.status === "ready" && project.audio === null;
+}
+
 export function hasPlayableSource(project: Project): boolean {
   return project.status !== "importing" && project.source.filename !== null;
 }

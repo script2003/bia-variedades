@@ -75,4 +75,11 @@ export const api = {
     request<Project>("/api/projects/from-link", { method: "POST", body: JSON.stringify(payload) }),
   listExports: () => request<ExportedVideo[]>("/api/exports"),
   sourceUrl: (id: string) => `/api/projects/${encodeURIComponent(id)}/source`,
+  audioUrl: (project: Project) =>
+    `/api/projects/${encodeURIComponent(project.id)}/audio?v=${encodeURIComponent(project.audio?.size_bytes ?? 0)}`,
+  /** A versão na URL evita que o navegador mostre uma miniatura antiga após reprocessar. */
+  thumbnailUrl: (project: Project) =>
+    project.thumbnail
+      ? `/api/projects/${encodeURIComponent(project.id)}/thumbnail?v=${encodeURIComponent(project.updated_at)}`
+      : null,
 };

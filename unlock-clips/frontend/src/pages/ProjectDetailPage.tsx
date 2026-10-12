@@ -1,4 +1,4 @@
-import { ArrowLeft, FolderX, Pencil, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, AudioLines, FolderX, Pencil, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
@@ -6,12 +6,13 @@ import type { ClipSettings, Project } from "../api/types";
 import ClipSettingsForm from "../components/ClipSettingsForm";
 import EmptyState from "../components/EmptyState";
 import JobProgress from "../components/JobProgress";
+import MediaDetails from "../components/MediaDetails";
 import Notice from "../components/Notice";
 import PipelineSteps from "../components/PipelineSteps";
 import StatusBadge from "../components/StatusBadge";
 import { usePolling } from "../hooks/usePolling";
 import { CONTAINER_LABEL, formatBytes, formatDateTime } from "../lib/format";
-import { canRetry, hasActiveJob, hasPlayableSource } from "../lib/projects";
+import { canRetry, hasActiveJob, hasPlayableSource, needsAudioExtraction } from "../lib/projects";
 
 function TitleEditor({ project, onSaved, onError }: { project: Project; onSaved: (p: Project) => void; onError: (m: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -95,6 +96,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   const [settings, setSettings] = useState<ClipSettings | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
   const { data: project, error, loading, setData, refresh } = usePolling(
     () => api.getProject(projectId),
@@ -193,6 +195,11 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               <RotateCcw className="size-4" aria-hidden /> Tentar novamente
             </button>
           )}
+          {needsAudioExtraction(project) && (
+            <button type="button" className="btn btn-primary" onClick={retry} disabled={busy}>
+              <AudioLines className="size-4" aria-hidden /> Extrair áudio
+            </button>
+          )}
           <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
             <Trash2 className="size-4" aria-hidden /> Excluir
           </button>
@@ -207,10 +214,15 @@ function ProjectDetail({ projectId }: { projectId: string }) {
             {warning}
           </Notice>
         ))}
-        {project.status === "ready" && (
+        {project.status === "ready" && project.audio && (
           <Notice tone="success">
-            Vídeo recebido e verificado. A extração de áudio, a transcrição e a sugestão de cortes serão adicionadas nas
-            próximas etapas do desenvolvimento.
+            Vídeo verificado e áudio extraído. A transcrição e a sugestão de cortes serão adicionadas nas próximas etapas
+            do desenvolvimento.
+          </Notice>
+        )}
+        {needsAudioExtraction(project) && (
+          <Notice tone="info">
+            Este projeto foi criado antes da extração de áudio. Clique em <strong>Extrair áudio</strong> para prepará-lo.
           </Notice>
         )}
       </div>
@@ -223,8 +235,10 @@ function ProjectDetail({ projectId }: { projectId: string }) {
                 key={project.source.filename}
                 className="aspect-video w-full bg-black"
                 src={api.sourceUrl(project.id)}
+                poster={api.thumbnailUrl(project) ?? undefined}
                 controls
                 preload="metadata"
+                onError={() => setVideoError(true)}
               >
                 Seu navegador não consegue reproduzir este vídeo.
               </video>
@@ -233,12 +247,21 @@ function ProjectDetail({ projectId }: { projectId: string }) {
                 {project.status === "importing" ? "O vídeo está sendo importado…" : "Vídeo indisponível."}
               </div>
             )}
+            {videoError && (
+              <p className="border-t border-ink-700 px-4 py-3 text-xs text-amber-300">
+                O navegador não consegue reproduzir este vídeo
+                {project.media?.video ? ` (codec ${project.media.video.codec.toUpperCase()})` : ""}. Isso não afeta o
+                processamento: os cortes serão gerados em MP4 compatível.
+              </p>
+            )}
             {hasActiveJob(project) && (
               <div className="border-t border-ink-700 p-4">
                 <JobProgress project={project} onChange={setData} onError={showError} />
               </div>
             )}
           </section>
+
+          <MediaDetails project={project} />
 
           <section className="card p-5 sm:p-6">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">

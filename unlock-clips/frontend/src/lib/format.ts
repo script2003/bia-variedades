@@ -48,9 +48,27 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
   return formatDateTime(iso);
 }
 
+/** 3,2 s → "0:03"; 3725 s → "1:02:05". */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return "—";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+export function formatBitrate(bitsPerSecond: number | null | undefined): string {
+  if (!bitsPerSecond || bitsPerSecond <= 0) return "—";
+  if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} Mb/s`;
+  return `${Math.round(bitsPerSecond / 1000)} kb/s`;
+}
+
 export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   importing: "Importando",
   validating: "Verificando",
+  extracting_audio: "Extraindo áudio",
   ready: "Pronto",
   failed: "Erro",
   cancelled: "Cancelado",
@@ -67,6 +85,7 @@ export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
 };
 
 export const JOB_KIND_LABEL: Record<JobKind, string> = {
+  process: "Preparação do vídeo",
   validate: "Verificação do arquivo",
   import_link: "Importação por link",
 };

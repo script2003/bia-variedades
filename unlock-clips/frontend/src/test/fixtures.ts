@@ -16,6 +16,7 @@ export const appSettings: AppSettings = {
   clip_defaults: clipDefaults,
   allowed_link_domains: ["exemplo.com"],
   max_upload_size_mb: 10,
+  ffmpeg_dir: null,
 };
 
 export function makeProject(overrides: Partial<Project> = {}): Project {
@@ -37,6 +38,23 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
       sha256: "f".repeat(64),
     },
     settings: clipDefaults,
+    media: {
+      duration_seconds: 3725,
+      format_name: "mov,mp4,m4a,3gp,3g2,mj2",
+      bit_rate: 2_500_000,
+      video: { index: 0, codec: "h264", width: 1920, height: 1080, fps: 29.97, rotation: 0 },
+      audio_streams: [{ index: 1, codec: "aac", sample_rate: 48000, channels: 2, language: "por", default: true }],
+    },
+    audio: {
+      filename: "audio.wav",
+      source_stream_index: 1,
+      codec: "pcm_s16le",
+      sample_rate: 16000,
+      channels: 1,
+      duration_seconds: 3725,
+      size_bytes: 119_200_044,
+    },
+    thumbnail: "thumbnail.jpg",
     job: null,
     warnings: [],
     error: null,

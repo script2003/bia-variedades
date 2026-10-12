@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
 from .. import __version__
+from ..ffmpeg import FFmpegNotFound, find_tools, tool_version
 from ..schemas import AppSettings, ExportedVideo, HealthInfo, SystemStats
 from ..services import ProjectService
 from ..storage import SettingsStore
@@ -20,13 +20,25 @@ Settings = Annotated[SettingsStore, Depends(get_settings_store)]
 
 
 @router.get("/health", response_model=HealthInfo)
-def health(request: Request) -> HealthInfo:
-    return HealthInfo(
+def health(request: Request, store: Settings) -> HealthInfo:
+    info = HealthInfo(
         version=__version__,
-        ffmpeg_available=shutil.which("ffmpeg") is not None,
-        ffprobe_available=shutil.which("ffprobe") is not None,
+        ffmpeg_available=False,
+        ffprobe_available=False,
         data_dir=str(request.app.state.config.data_dir),
     )
+    try:
+        tools = find_tools(store.get().ffmpeg_dir)
+    except FFmpegNotFound as exc:
+        info.ffmpeg_error = str(exc)
+        return info
+    info.ffmpeg_path, info.ffprobe_path = tools.ffmpeg, tools.ffprobe
+    info.ffmpeg_version = tool_version(tools.ffmpeg)
+    info.ffmpeg_available = info.ffmpeg_version is not None
+    info.ffprobe_available = tool_version(tools.ffprobe) is not None
+    if not (info.ffmpeg_available and info.ffprobe_available):
+        info.ffmpeg_error = "O FFmpeg foi encontrado, mas não pôde ser executado."
+    return info
 
 
 @router.get("/stats", response_model=SystemStats)
