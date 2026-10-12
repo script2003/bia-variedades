@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { makeProject, mockFetch } from "../test/fixtures";
+import { makeProject, mockFetch, sampleTranscript } from "../test/fixtures";
 import ProjectDetailPage from "./ProjectDetailPage";
 
 function renderPage(id: string) {
@@ -18,9 +18,16 @@ function renderPage(id: string) {
 describe("ProjectDetailPage", () => {
   it("mostra mídia, áudio extraído e miniatura de um projeto pronto", async () => {
     const project = makeProject();
-    vi.stubGlobal("fetch", mockFetch({ [`GET /api/projects/${project.id}`]: () => ({ body: project }) }).fn);
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        [`GET /api/projects/${project.id}`]: () => ({ body: project }),
+        [`GET /api/projects/${project.id}/transcript`]: () => ({ body: sampleTranscript }),
+      }).fn,
+    );
     renderPage(project.id);
-    expect(await screen.findByText(/áudio extraído\. A transcrição/)).toBeInTheDocument();
+    expect(await screen.findByText(/Vídeo transcrito\./)).toBeInTheDocument();
+    expect(await screen.findByText("Hoje vamos falar de educação.")).toBeInTheDocument();
     expect(screen.getByLabelText("Áudio extraído")).toBeInTheDocument();
     expect(document.querySelector("video")?.getAttribute("poster")).toContain("/thumbnail?v=");
     expect(screen.queryByRole("button", { name: /Extrair áudio/ })).not.toBeInTheDocument();

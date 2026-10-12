@@ -5,13 +5,38 @@ import { makeProject } from "../test/fixtures";
 import PipelineSteps, { buildSteps } from "./PipelineSteps";
 
 const states = (project: Project) => buildSteps(project).slice(0, 4).map((s) => s.state);
+const transcriptState = (project: Project) => buildSteps(project)[4]!.state;
 const base = makeProject();
 
 describe("buildSteps", () => {
-  it("marca as quatro etapas implementadas como concluídas e nunca as futuras", () => {
+  it("marca as cinco etapas implementadas como concluídas e nunca as futuras", () => {
     const steps = buildSteps(base);
     expect(states(base)).toEqual(["done", "done", "done", "done"]);
-    expect(steps.slice(4).every((s) => s.state === "unavailable")).toBe(true);
+    expect(transcriptState(base)).toBe("done");
+    expect(steps[4]!.description).toBe("9 palavras · modelo small");
+    expect(steps.slice(5).every((s) => s.state === "unavailable")).toBe(true);
+  });
+
+  it("acompanha a transcrição", () => {
+    expect(transcriptState(makeProject({ status: "transcribing", transcript: null }))).toBe("active");
+    expect(transcriptState(makeProject({ status: "ready", transcript: null }))).toBe("pending");
+    const failed = makeProject({
+      status: "failed",
+      transcript: null,
+      job: {
+        id: "j",
+        kind: "transcribe",
+        status: "failed",
+        progress: 0.4,
+        message: "Falhou",
+        error: "x",
+        created_at: base.created_at,
+        started_at: base.created_at,
+        finished_at: base.created_at,
+      },
+    });
+    expect(transcriptState(failed)).toBe("error");
+    expect(states(failed)).toEqual(["done", "done", "done", "done"]);
   });
 
   it("acompanha importação, verificação, leitura e extração", () => {
@@ -49,6 +74,7 @@ describe("PipelineSteps", () => {
   it("renderiza rótulos acessíveis", () => {
     render(<PipelineSteps project={base} />);
     expect(screen.getByLabelText("Extração de áudio: concluída")).toBeInTheDocument();
-    expect(screen.getByLabelText("Transcrição com timestamps: disponível em breve")).toBeInTheDocument();
+    expect(screen.getByLabelText("Transcrição com timestamps: concluída")).toBeInTheDocument();
+    expect(screen.getByLabelText("Identificação de cortes: disponível em breve")).toBeInTheDocument();
   });
 });

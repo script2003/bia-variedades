@@ -20,17 +20,22 @@ from .config import AppConfig
 from .links import ClientFactory, default_client_factory
 from .services import ProjectService, ServiceError
 from .storage import ProjectStore, SettingsStore
+from .transcription import WhisperEngine
 
 logger = logging.getLogger("unlock_clips")
 
 
-def create_app(config: AppConfig | None = None, client_factory: ClientFactory = default_client_factory) -> FastAPI:
+def create_app(
+    config: AppConfig | None = None,
+    client_factory: ClientFactory = default_client_factory,
+    engine: WhisperEngine | None = None,
+) -> FastAPI:
     config = config or AppConfig.from_env()
     config.ensure_dirs()
 
     settings_store = SettingsStore(config.settings_file)
     store = ProjectStore(config.projects_dir)
-    service = ProjectService(config, store, settings_store, client_factory=client_factory)
+    service = ProjectService(config, store, settings_store, client_factory=client_factory, engine=engine)
     recovered = service.recover_after_restart()
     if recovered:
         logger.warning("%d tarefa(s) interrompida(s) no último encerramento foram marcadas para retomada.", recovered)

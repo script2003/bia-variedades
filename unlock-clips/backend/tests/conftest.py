@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.main import create_app
+from app.schemas import AppSettings, TranscriptionSettings
+from app.storage import SettingsStore
 
 # Cabeçalho mínimo de um MP4 (caixa "ftyp") seguido de dados de preenchimento.
 MP4_HEADER = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
@@ -55,15 +57,39 @@ def real_video(media_dir) -> bytes:
     return (media_dir / "sample.mp4").read_bytes()
 
 
+@pytest.fixture(scope="session")
+def tiny_model_dir(tmp_path_factory) -> Path:
+    """Modelo Whisper minúsculo com pesos aleatórios (ver tests/tiny_whisper.py)."""
+    pytest.importorskip("faster_whisper")
+    from .tiny_whisper import build_tiny_whisper
+
+    return build_tiny_whisper(tmp_path_factory.mktemp("whisper") / "tiny-random")
+
+
+# Temperatura fixa: o modelo aleatório sempre "falharia" nos limiares de qualidade e o
+# faster-whisper repetiria cada janela com temperaturas maiores, deixando os testes lentos.
+FAST_WHISPER_OPTIONS = {"temperature": 0.0}
+
+
+def write_settings(config: AppConfig, **transcription: object) -> None:
+    """Grava settings.json antes de iniciar a aplicação. Por padrão, sem transcrição automática."""
+    config.ensure_dirs()
+    options = {"auto_transcribe": False, **transcription}
+    SettingsStore(config.settings_file).save(AppSettings(transcription=TranscriptionSettings(**options)))
+
+
 @pytest.fixture
 def config(tmp_path) -> AppConfig:
-    return AppConfig(
+    config = AppConfig(
         data_dir=tmp_path / "data",
         frontend_dist=None,
         cors_origins=("http://localhost:5173",),
         max_workers=2,
         io_chunk_size=64 * 1024,
+        whisper_options=FAST_WHISPER_OPTIONS,
     )
+    write_settings(config)
+    return config
 
 
 class MockSource:

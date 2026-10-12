@@ -15,6 +15,12 @@ function setup(path = "/") {
       "GET /api/projects": () => ({ body: [makeProject({ title: "Entrevista com a pesquisadora" })] }),
       "GET /api/stats": () => ({ body: stats }),
       "GET /api/exports": () => ({ body: [] }),
+      "GET /api/transcription/models": () => ({
+        body: [
+          { name: "small", label: "Small", size_mb: 484, description: "Recomendado para CPU", installed: true, path: "x" },
+          { name: "medium", label: "Medium", size_mb: 1530, description: "Mais preciso", installed: false, path: "y" },
+        ],
+      }),
       "GET /api/health": () => ({
         body: {
           status: "ok",
@@ -25,6 +31,8 @@ function setup(path = "/") {
           ffprobe_path: null,
           ffmpeg_version: null,
           ffmpeg_error: "FFmpeg não foi encontrado. No Windows, instale com 'winget install -e --id Gyan.FFmpeg'",
+          transcription_available: true,
+          transcription_error: null,
           data_dir: "C:\\dados",
         },
       }),
@@ -64,6 +72,8 @@ describe("App", () => {
     expect(await screen.findByText("Links autorizados")).toBeInTheDocument();
     expect(await screen.findByText("FFmpeg indisponível")).toBeInTheDocument();
     expect(screen.getByLabelText("Pasta do FFmpeg (opcional)")).toHaveValue("");
+    expect(screen.getByRole("radio", { name: /Small.*baixado/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Medium/ })).toHaveTextContent("1,5 GB");
   });
 
   it("exibe página 404 para rotas desconhecidas", () => {

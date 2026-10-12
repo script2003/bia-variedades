@@ -6,7 +6,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.schemas import JobInfo, Project, SourceInfo
+from app.schemas import SCHEMA_VERSION, JobInfo, Project, SourceInfo
 from app.storage import ProjectStore
 
 from .conftest import fake_video, upload, wait_for_status
@@ -389,5 +389,5 @@ def test_stage1_project_can_be_processed(config, mock_source, real_video):
         assert client.post(f"/api/projects/{legacy.id}/retry").status_code == 200
         project = wait_for_status(client, legacy.id, {"ready", "failed"})
         assert project["status"] == "ready" and project["audio"] is not None
-        assert project["schema_version"] == 2
+        assert project["schema_version"] == SCHEMA_VERSION
         assert client.post(f"/api/projects/{legacy.id}/retry").status_code == 409

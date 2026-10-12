@@ -1,8 +1,9 @@
 import { CheckCircle2, Save, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import type { AppSettings, HealthInfo } from "../api/types";
+import type { AppSettings, HealthInfo, WhisperModelOption } from "../api/types";
 import ClipSettingsForm from "../components/ClipSettingsForm";
+import TranscriptionSettingsForm from "../components/TranscriptionSettingsForm";
 import Notice from "../components/Notice";
 import PageHeader from "../components/PageHeader";
 
@@ -47,17 +48,19 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [domainsText, setDomainsText] = useState("");
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [models, setModels] = useState<WhisperModelOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.getSettings(), api.health()])
-      .then(([loaded, info]) => {
+    Promise.all([api.getSettings(), api.health(), api.transcriptionModels()])
+      .then(([loaded, info, catalog]) => {
         if (!active) return;
         setSettings(loaded);
         setDomainsText(loaded.allowed_link_domains.join("\n"));
         setHealth(info);
+        setModels(catalog);
       })
       .catch((err: Error) => active && setMessage({ tone: "error", text: err.message }));
     return () => {
@@ -74,9 +77,11 @@ export default function SettingsPage() {
       const saved = await api.saveSettings({ ...settings, allowed_link_domains: parseDomains(domainsText) });
       setSettings(saved);
       setDomainsText(saved.allowed_link_domains.join("\n"));
+      // A pasta do FFmpeg e os modelos podem ter mudado: verifica novamente antes de confirmar.
+      const [info, catalog] = await Promise.all([api.health(), api.transcriptionModels()]);
+      setHealth(info);
+      setModels(catalog);
       setMessage({ tone: "success", text: "Configurações salvas." });
-      // A pasta do FFmpeg pode ter mudado: verifica novamente.
-      setHealth(await api.health());
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -136,6 +141,22 @@ export default function SettingsPage() {
                 }}
               />
             </div>
+          </section>
+
+          <section className="card grid gap-4 p-5 sm:p-6" aria-label="Transcrição">
+            <div>
+              <h2 className="mb-1 text-lg font-semibold">Transcrição</h2>
+              <p className="text-sm text-zinc-500">
+                Feita localmente com o faster-whisper, sem serviços pagos. O idioma usado é o{" "}
+                <strong className="text-zinc-300">idioma das legendas</strong> de cada projeto.
+              </p>
+            </div>
+            {health && !health.transcription_available && <Notice tone="warning">{health.transcription_error}</Notice>}
+            <TranscriptionSettingsForm
+              value={settings.transcription}
+              models={models}
+              onChange={(transcription) => setSettings({ ...settings, transcription })}
+            />
           </section>
 
           <section className="card grid gap-4 p-5 sm:p-6">

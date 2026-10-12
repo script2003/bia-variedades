@@ -15,7 +15,7 @@ interface Step {
  * como "disponível em breve" — nunca como concluídas.
  */
 export function buildSteps(project: Project): Step[] {
-  const { status, source, media, audio } = project;
+  const { status, source, media, audio, transcript, job } = project;
   const importing = status === "importing";
   const problem = ["failed", "cancelled", "interrupted"].includes(status);
   const hasFile = source.filename !== null && !importing;
@@ -33,6 +33,13 @@ export function buildSteps(project: Project): Step[] {
       : problem && media
         ? "error"
         : "pending";
+  const transcriptState: StepState = transcript
+    ? "done"
+    : status === "transcribing"
+      ? "active"
+      : problem && audio && job?.kind === "transcribe"
+        ? "error"
+        : "pending";
   const later = (title: string, description: string): Step => ({ title, description, state: "unavailable" });
 
   return [
@@ -44,7 +51,13 @@ export function buildSteps(project: Project): Step[] {
     { title: "Verificação do arquivo", description: "Formato, assinatura do contêiner e integridade (SHA-256).", state: verifyState },
     { title: "Leitura da mídia", description: "Duração, trilhas e codecs com FFprobe.", state: mediaState },
     { title: "Extração de áudio", description: "WAV mono 16 kHz com FFmpeg, pronto para transcrição.", state: audioState },
-    later("Transcrição com timestamps", "faster-whisper local — Etapa 3."),
+    {
+      title: "Transcrição com timestamps",
+      description: transcript
+        ? `${transcript.word_count.toLocaleString("pt-BR")} palavras · modelo ${transcript.model}`
+        : "faster-whisper local, com tempo de cada palavra.",
+      state: transcriptState,
+    },
     later("Identificação de cortes", "Pontuação heurística explicável — Etapa 4."),
     later("Legendas e formato vertical", "Legendas sincronizadas e 9:16 — Etapa 5."),
     later("Edição e exportação MP4", "Editor de cortes — Etapa 6."),

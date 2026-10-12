@@ -69,6 +69,7 @@ export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   importing: "Importando",
   validating: "Verificando",
   extracting_audio: "Extraindo áudio",
+  transcribing: "Transcrevendo",
   ready: "Pronto",
   failed: "Erro",
   cancelled: "Cancelado",
@@ -86,6 +87,7 @@ export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
 
 export const JOB_KIND_LABEL: Record<JobKind, string> = {
   process: "Preparação do vídeo",
+  transcribe: "Transcrição",
   validate: "Verificação do arquivo",
   import_link: "Importação por link",
 };

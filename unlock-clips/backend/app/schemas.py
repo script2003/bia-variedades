@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DurationPreset = Literal["15-30", "30-60", "60-90"]
 AspectRatio = Literal["9:16", "1:1", "16:9"]
@@ -18,7 +18,7 @@ SubtitlePosition = Literal["inferior", "centro", "superior"]
 FramingMode = Literal["centro", "rosto"]
 
 # "validate" é mantido para ler projetos criados na Etapa 1.
-JobKind = Literal["process", "import_link", "validate"]
+JobKind = Literal["process", "import_link", "transcribe", "validate"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled", "interrupted"]
 ACTIVE_JOB_STATUSES: frozenset[str] = frozenset({"queued", "running"})
 
@@ -26,7 +26,8 @@ ProjectStatus = Literal[
     "importing",  # baixando o vídeo a partir de um link
     "validating",  # verificando o arquivo recebido
     "extracting_audio",  # lendo a mídia com FFprobe e extraindo o áudio com FFmpeg
-    "ready",  # áudio extraído, pronto para as próximas etapas
+    "transcribing",  # transcrevendo o áudio com faster-whisper
+    "ready",  # etapas concluídas até o momento (áudio extraído e, se ativado, transcrito)
     "failed",
     "cancelled",
     "interrupted",  # a aplicação foi fechada durante uma tarefa
@@ -86,6 +87,35 @@ def normalize_domain(raw: str) -> str:
     return value
 
 
+WhisperModelName = Literal["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
+WhisperDevice = Literal["cpu", "cuda"]
+WhisperComputeType = Literal["auto", "int8", "int8_float16", "float16", "float32"]
+
+
+class TranscriptionSettings(BaseModel):
+    """Configuração do faster-whisper (modelos locais, sem serviços pagos)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    model: WhisperModelName = "small"
+    # Pasta de um modelo já convertido para CTranslate2 (substitui o modelo da lista).
+    model_dir: str | None = Field(default=None, max_length=1024)
+    device: WhisperDevice = "cpu"
+    compute_type: WhisperComputeType = "auto"
+    beam_size: int = Field(default=5, ge=1, le=10)
+    vad_filter: bool = True
+    auto_transcribe: bool = True
+    allow_download: bool = True
+
+    @field_validator("model_dir")
+    @classmethod
+    def _strip_model_dir(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip().strip('"').strip()
+        return value or None
+
+
 class AppSettings(BaseModel):
     """Preferências globais persistidas em ``settings.json``."""
 
@@ -96,6 +126,7 @@ class AppSettings(BaseModel):
     max_upload_size_mb: int = Field(default=8192, ge=1, le=102_400)
     # Pasta com ffmpeg(.exe) e ffprobe(.exe). Vazio = procurar no PATH do sistema.
     ffmpeg_dir: str | None = Field(default=None, max_length=1024)
+    transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
 
     @field_validator("ffmpeg_dir")
     @classmethod
@@ -204,6 +235,52 @@ class AudioInfo(BaseModel):
     size_bytes: int
 
 
+class TranscriptWord(BaseModel):
+    start: float
+    end: float
+    text: str
+    probability: float
+
+
+class TranscriptSegment(BaseModel):
+    id: int
+    start: float
+    end: float
+    text: str
+    words: list[TranscriptWord] = Field(default_factory=list)
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
+
+
+class Transcript(BaseModel):
+    """Transcrição completa, salva em ``transcript.json`` na pasta do projeto."""
+
+    engine: str = "faster-whisper"
+    model: str
+    language: str
+    language_probability: float | None = None
+    duration_seconds: float
+    created_at: datetime = Field(default_factory=utcnow)
+    segments: list[TranscriptSegment] = Field(default_factory=list)
+
+    @property
+    def word_count(self) -> int:
+        return sum(len(segment.words) or len(segment.text.split()) for segment in self.segments)
+
+
+class TranscriptSummary(BaseModel):
+    """Resumo guardado no ``project.json`` (o texto completo fica em ``transcript.json``)."""
+
+    filename: str
+    engine: str
+    model: str
+    language: str
+    segment_count: int
+    word_count: int
+    duration_seconds: float
+    created_at: datetime
+
+
 class Project(BaseModel):
     schema_version: int = SCHEMA_VERSION
     id: str = Field(default_factory=new_id)
@@ -216,6 +293,7 @@ class Project(BaseModel):
     media: MediaInfo | None = None
     audio: AudioInfo | None = None
     thumbnail: str | None = None
+    transcript: TranscriptSummary | None = None
     job: JobInfo | None = None
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
@@ -256,6 +334,15 @@ class ExportedVideo(BaseModel):
     url: str
 
 
+class WhisperModelOption(BaseModel):
+    name: str
+    label: str
+    size_mb: int
+    description: str
+    installed: bool
+    path: str
+
+
 class SystemStats(BaseModel):
     projects_total: int
     projects_by_status: dict[str, int]
@@ -273,4 +360,6 @@ class HealthInfo(BaseModel):
     ffprobe_path: str | None = None
     ffmpeg_version: str | None = None
     ffmpeg_error: str | None = None
+    transcription_available: bool = False
+    transcription_error: str | None = None
     data_dir: str

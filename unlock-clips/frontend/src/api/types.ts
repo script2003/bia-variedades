@@ -18,14 +18,39 @@ export interface ClipSettings {
   max_clips: number;
 }
 
+export type WhisperModelName = "tiny" | "base" | "small" | "medium" | "large-v3-turbo" | "large-v3";
+export type WhisperDevice = "cpu" | "cuda";
+export type WhisperComputeType = "auto" | "int8" | "int8_float16" | "float16" | "float32";
+
+export interface TranscriptionSettings {
+  model: WhisperModelName;
+  model_dir: string | null;
+  device: WhisperDevice;
+  compute_type: WhisperComputeType;
+  beam_size: number;
+  vad_filter: boolean;
+  auto_transcribe: boolean;
+  allow_download: boolean;
+}
+
 export interface AppSettings {
   clip_defaults: ClipSettings;
   allowed_link_domains: string[];
   max_upload_size_mb: number;
   ffmpeg_dir: string | null;
+  transcription: TranscriptionSettings;
 }
 
-export type JobKind = "process" | "import_link" | "validate";
+export interface WhisperModelOption {
+  name: WhisperModelName;
+  label: string;
+  size_mb: number;
+  description: string;
+  installed: boolean;
+  path: string;
+}
+
+export type JobKind = "process" | "import_link" | "transcribe" | "validate";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export interface JobInfo {
@@ -44,6 +69,7 @@ export type ProjectStatus =
   | "importing"
   | "validating"
   | "extracting_audio"
+  | "transcribing"
   | "ready"
   | "failed"
   | "cancelled"
@@ -96,6 +122,44 @@ export interface AudioInfo {
   size_bytes: number;
 }
 
+export interface TranscriptWord {
+  start: number;
+  end: number;
+  text: string;
+  probability: number;
+}
+
+export interface TranscriptSegment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  words: TranscriptWord[];
+  avg_logprob: number | null;
+  no_speech_prob: number | null;
+}
+
+export interface Transcript {
+  engine: string;
+  model: string;
+  language: string;
+  language_probability: number | null;
+  duration_seconds: number;
+  created_at: string;
+  segments: TranscriptSegment[];
+}
+
+export interface TranscriptSummary {
+  filename: string;
+  engine: string;
+  model: string;
+  language: string;
+  segment_count: number;
+  word_count: number;
+  duration_seconds: number;
+  created_at: string;
+}
+
 export interface Project {
   schema_version: number;
   id: string;
@@ -108,6 +172,7 @@ export interface Project {
   media: MediaInfo | null;
   audio: AudioInfo | null;
   thumbnail: string | null;
+  transcript: TranscriptSummary | null;
   job: JobInfo | null;
   warnings: string[];
   error: string | null;
@@ -151,5 +216,7 @@ export interface HealthInfo {
   ffprobe_path: string | null;
   ffmpeg_version: string | null;
   ffmpeg_error: string | null;
+  transcription_available: boolean;
+  transcription_error: string | null;
   data_dir: string;
 }

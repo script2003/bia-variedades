@@ -7,6 +7,7 @@ Preferências do usuário (padrões dos cortes, domínios autorizados etc.) fica
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,8 @@ class AppConfig:
     max_workers: int = 2
     # Tamanho do bloco usado ao gravar uploads/downloads e ao calcular hashes.
     io_chunk_size: int = 1024 * 1024
+    # Opções extras repassadas ao faster-whisper (uso avançado e testes).
+    whisper_options: Mapping[str, object] | None = None
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -63,9 +66,13 @@ class AppConfig:
         return self.data_dir / "tmp"
 
     @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "models"
+
+    @property
     def settings_file(self) -> Path:
         return self.data_dir / "settings.json"
 
     def ensure_dirs(self) -> None:
-        for path in (self.data_dir, self.projects_dir, self.tmp_dir):
+        for path in (self.data_dir, self.projects_dir, self.tmp_dir, self.models_dir):
             path.mkdir(parents=True, exist_ok=True)

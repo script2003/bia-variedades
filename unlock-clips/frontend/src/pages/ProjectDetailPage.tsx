@@ -1,5 +1,5 @@
 import { ArrowLeft, AudioLines, FolderX, Pencil, RotateCcw, Save, Trash2 } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import type { ClipSettings, Project } from "../api/types";
@@ -10,6 +10,7 @@ import MediaDetails from "../components/MediaDetails";
 import Notice from "../components/Notice";
 import PipelineSteps from "../components/PipelineSteps";
 import StatusBadge from "../components/StatusBadge";
+import TranscriptPanel from "../components/TranscriptPanel";
 import { usePolling } from "../hooks/usePolling";
 import { CONTAINER_LABEL, formatBytes, formatDateTime } from "../lib/format";
 import { canRetry, hasActiveJob, hasPlayableSource, needsAudioExtraction } from "../lib/projects";
@@ -97,6 +98,8 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   const [savingSettings, setSavingSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const { data: project, error, loading, setData, refresh } = usePolling(
     () => api.getProject(projectId),
@@ -127,6 +130,14 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   const showError = (text: string) => setMessage({ tone: "error", text });
+
+  const seek = (seconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = seconds;
+    setCurrentTime(seconds);
+    video.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  };
   const settingsDirty = settings !== null && JSON.stringify(settings) !== JSON.stringify(project.settings);
 
   const saveSettings = async () => {
@@ -214,10 +225,14 @@ function ProjectDetail({ projectId }: { projectId: string }) {
             {warning}
           </Notice>
         ))}
-        {project.status === "ready" && project.audio && (
+        {project.status === "ready" && project.transcript && (
           <Notice tone="success">
-            Vídeo verificado e áudio extraído. A transcrição e a sugestão de cortes serão adicionadas nas próximas etapas
-            do desenvolvimento.
+            Vídeo transcrito. A sugestão automática de cortes será adicionada na próxima etapa do desenvolvimento.
+          </Notice>
+        )}
+        {project.status === "ready" && project.audio && !project.transcript && (
+          <Notice tone="info">
+            Áudio extraído e pronto para transcrição. Clique em <strong>Transcrever agora</strong> no painel de transcrição.
           </Notice>
         )}
         {needsAudioExtraction(project) && (
@@ -232,7 +247,9 @@ function ProjectDetail({ projectId }: { projectId: string }) {
           <section className="card overflow-hidden">
             {hasPlayableSource(project) ? (
               <video
+                ref={videoRef}
                 key={project.source.filename}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                 className="aspect-video w-full bg-black"
                 src={api.sourceUrl(project.id)}
                 poster={api.thumbnailUrl(project) ?? undefined}
@@ -260,6 +277,17 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               </div>
             )}
           </section>
+
+          <TranscriptPanel
+            project={project}
+            currentTime={currentTime}
+            onSeek={seek}
+            onProjectChange={(p) => {
+              setData(p);
+              void refresh();
+            }}
+            onError={showError}
+          />
 
           <MediaDetails project={project} />
 

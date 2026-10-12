@@ -8,6 +8,11 @@ export function canRetry(project: Project): boolean {
   return !hasActiveJob(project) && ["failed", "cancelled", "interrupted"].includes(project.status);
 }
 
+/** O áudio já foi extraído e nenhuma tarefa está rodando: pode transcrever (ou refazer). */
+export function canTranscribe(project: Project): boolean {
+  return !hasActiveJob(project) && project.status === "ready" && project.audio !== null;
+}
+
 /** Projetos criados antes da Etapa 2: prontos, mas sem o áudio extraído. */
 export function needsAudioExtraction(project: Project): boolean {
   return !hasActiveJob(project) && project.status === "ready" && project.audio === null;

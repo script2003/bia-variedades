@@ -57,13 +57,17 @@ from .schemas import (
     ProjectUpdate,
     SourceInfo,
     SystemStats,
+    Transcript,
+    TranscriptSummary,
     new_id,
     utcnow,
 )
-from .storage import ProjectNotFound, ProjectStore, SettingsStore, is_valid_project_id
+from .storage import ProjectNotFound, ProjectStore, SettingsStore, atomic_write_text, is_valid_project_id
+from .transcription import WhisperEngine
 
 logger = logging.getLogger(__name__)
 
+TRANSCRIPT_FILENAME = "transcript.json"
 INTERRUPTED_MESSAGE = (
     "A aplicação foi encerrada antes de concluir esta tarefa. Clique em “Tentar novamente” para retomar."
 )
@@ -98,11 +102,13 @@ class ProjectService:
         store: ProjectStore,
         settings_store: SettingsStore,
         client_factory: ClientFactory = default_client_factory,
+        engine: WhisperEngine | None = None,
     ) -> None:
         self.config = config
         self.store = store
         self.settings_store = settings_store
         self._client_factory = client_factory
+        self.engine = engine or WhisperEngine(config.models_dir, extra_options=dict(config.whisper_options or {}))
         self._job_projects: dict[str, str] = {}
         self._job_lock = threading.Lock()
         self.jobs = JobManager(listener=self, max_workers=config.max_workers)
@@ -124,6 +130,13 @@ class ProjectService:
         if path is None or not path.is_file():
             raise ServiceError(404, "O áudio deste projeto ainda não foi extraído.")
         return path
+
+    def get_transcript(self, project_id: str) -> Transcript:
+        project = self.get(project_id)
+        path = self.store.project_dir(project_id) / project.transcript.filename if project.transcript else None
+        if path is None or not path.is_file():
+            raise ServiceError(404, "Este projeto ainda não foi transcrito.")
+        return Transcript.model_validate_json(path.read_text(encoding="utf-8"))
 
     def thumbnail_path(self, project_id: str) -> Path:
         project = self.get(project_id)
@@ -304,6 +317,15 @@ class ProjectService:
 
         return self.store.update(project_id, mutate)
 
+    def transcribe(self, project_id: str) -> Project:
+        """Inicia (ou refaz) a transcrição do áudio extraído."""
+        project = self.get(project_id)
+        if project.job is not None and self.jobs.is_active(project.job.id):
+            raise ServiceError(409, "Já existe uma tarefa em andamento neste projeto.")
+        if not self._has_audio(project):
+            raise ServiceError(409, "Extraia o áudio do vídeo antes de transcrever.")
+        return self._start_job(project_id, "transcribe", "transcribing", self._transcribe_task(project_id))
+
     def cancel(self, project_id: str) -> Project:
         project = self.get(project_id)
         if project.job is None or not self.jobs.is_active(project.job.id):
@@ -322,6 +344,9 @@ class ProjectService:
         needs_audio = project.status == "ready" and project.audio is None
         if project.status not in ("failed", "cancelled", "interrupted") and not needs_audio:
             raise ServiceError(409, "Este projeto não precisa ser reprocessado.")
+        # Se a falha foi na transcrição, retoma só a transcrição (o áudio já está pronto).
+        if project.job is not None and project.job.kind == "transcribe" and self._has_audio(project):
+            return self._start_job(project_id, "transcribe", "transcribing", self._transcribe_task(project_id))
         source_file = (
             self.store.project_dir(project_id) / project.source.filename if project.source.filename else None
         )
@@ -450,6 +475,7 @@ class ProjectService:
             p.status = "extracting_audio"
             p.media = None
             p.audio = None
+            p.transcript = None
 
         project = self.store.update(project_id, set_extracting)
         assert project.source.filename is not None
@@ -475,6 +501,35 @@ class ProjectService:
             ctx, tools, source, folder / AUDIO_FILENAME, media, progress_start=probe_end, progress_end=end
         )
         self.store.update(project_id, lambda p: setattr(p, "audio", audio))
+
+    def _has_audio(self, project: Project) -> bool:
+        return project.audio is not None and (self.store.project_dir(project.id) / project.audio.filename).is_file()
+
+    def _transcribe_task(self, project_id: str):
+        def task(ctx: JobContext) -> None:
+            project = self.store.get(project_id)
+            if project.audio is None:
+                raise MediaError("O projeto não possui áudio extraído.")
+            folder = self.store.project_dir(project_id)
+            settings = self.settings_store.get().transcription
+            transcript = self.engine.transcribe(
+                ctx, folder / project.audio.filename, project.settings.subtitle_language, settings
+            )
+            ctx.check_cancelled()
+            atomic_write_text(folder / TRANSCRIPT_FILENAME, transcript.model_dump_json())
+            summary = TranscriptSummary(
+                filename=TRANSCRIPT_FILENAME,
+                engine=transcript.engine,
+                model=transcript.model,
+                language=transcript.language,
+                segment_count=len(transcript.segments),
+                word_count=transcript.word_count,
+                duration_seconds=transcript.duration_seconds,
+                created_at=transcript.created_at,
+            )
+            self.store.update(project_id, lambda p: setattr(p, "transcript", summary))
+
+        return task
 
     def _verify_source(self, ctx: JobContext, project_id: str, start: float, end: float) -> None:
         project = self.store.get(project_id)
@@ -534,7 +589,11 @@ class ProjectService:
         self._update_job(job_id, mutate)
 
     def job_finished(self, job_id: str, status: str, error: str | None) -> None:
+        auto_transcribe = status == "completed" and self.settings_store.get().transcription.auto_transcribe
+        next_job: JobInfo | None = None
+
         def mutate(project: Project) -> None:
+            nonlocal next_job
             assert project.job is not None
             project.job.status = status  # type: ignore[assignment]
             project.job.finished_at = utcnow()
@@ -544,6 +603,17 @@ class ProjectService:
                 project.job.message = "Concluído"
                 project.status = "ready"
                 project.error = None
+                # Encadeia a transcrição na MESMA gravação: a interface nunca vê o projeto
+                # "pronto e sem tarefa" entre a extração do áudio e o início da transcrição.
+                if (
+                    auto_transcribe
+                    and project.job.kind in ("process", "import_link")
+                    and project.transcript is None
+                    and self._has_audio(project)
+                ):
+                    next_job = JobInfo(kind="transcribe", message="Na fila")
+                    project.job = next_job
+                    project.status = "transcribing"
             elif status == "cancelled":
                 project.job.message = "Cancelado pelo usuário"
                 project.status = "cancelled"
@@ -552,7 +622,19 @@ class ProjectService:
                 project.status = "failed"
                 project.error = error
 
+        with self._job_lock:
+            project_id = self._job_projects.get(job_id)
         self._update_job(job_id, mutate, release=True)
+        if next_job is not None and project_id is not None:
+            self._submit_existing_job(project_id, next_job, self._transcribe_task(project_id))
+
+    def _submit_existing_job(self, project_id: str, job: JobInfo, task) -> None:
+        with self._job_lock:
+            self._job_projects[job.id] = project_id
+        try:
+            self.jobs.submit(job.id, task)
+        except RuntimeError:  # aplicação sendo encerrada: a tarefa será marcada como interrompida
+            logger.warning("Transcrição automática de %s não iniciada: aplicação encerrando.", project_id)
 
 
 def _too_large_message(settings: AppSettings) -> str:

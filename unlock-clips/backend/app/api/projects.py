@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import ValidationError
 
-from ..schemas import ClipSettings, LinkImportRequest, Project, ProjectUpdate
+from ..schemas import ClipSettings, LinkImportRequest, Project, ProjectUpdate, Transcript
+from ..transcription import to_srt, to_text, to_vtt
 from ..services import ProjectService
 from .deps import get_service
 
@@ -95,6 +96,38 @@ def stream_audio(project_id: str, service: Service) -> FileResponse:
     """Áudio extraído (WAV mono 16 kHz), com suporte a Range para o player."""
     path = service.audio_path(project_id)
     return FileResponse(path, media_type="audio/wav", content_disposition_type="inline", filename=path.name)
+
+
+@router.post("/{project_id}/transcribe", response_model=Project)
+def transcribe(project_id: str, service: Service) -> Project:
+    """Inicia (ou refaz) a transcrição do áudio extraído com o modelo configurado."""
+    return service.transcribe(project_id)
+
+
+@router.get("/{project_id}/transcript", response_model=Transcript)
+def get_transcript(project_id: str, service: Service) -> Transcript:
+    return service.get_transcript(project_id)
+
+
+_TRANSCRIPT_FORMATS = {
+    "srt": (to_srt, "application/x-subrip"),
+    "vtt": (to_vtt, "text/vtt"),
+    "txt": (to_text, "text/plain"),
+}
+
+
+@router.get("/{project_id}/transcript.{fmt}")
+def download_transcript(project_id: str, fmt: str, service: Service) -> PlainTextResponse:
+    if fmt not in _TRANSCRIPT_FORMATS:
+        raise HTTPException(404, "Formato não suportado. Use srt, vtt ou txt.")
+    transcript = service.get_transcript(project_id)
+    render, media_type = _TRANSCRIPT_FORMATS[fmt]
+    filename = f"transcricao-{project_id[:8]}.{fmt}"
+    return PlainTextResponse(
+        render(transcript),
+        media_type=f"{media_type}; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{project_id}/thumbnail")

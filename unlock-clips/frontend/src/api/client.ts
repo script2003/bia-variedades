@@ -6,6 +6,8 @@ import type {
   Project,
   ProjectUpdate,
   SystemStats,
+  Transcript,
+  WhisperModelOption,
 } from "./types";
 
 export class ApiError extends Error {
@@ -71,6 +73,11 @@ export const api = {
   deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   cancelJob: (id: string) => request<Project>(`/api/projects/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   retryJob: (id: string) => request<Project>(`/api/projects/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  transcribe: (id: string) => request<Project>(`/api/projects/${encodeURIComponent(id)}/transcribe`, { method: "POST" }),
+  getTranscript: (id: string) => request<Transcript>(`/api/projects/${encodeURIComponent(id)}/transcript`),
+  transcriptDownloadUrl: (id: string, format: "srt" | "vtt" | "txt") =>
+    `/api/projects/${encodeURIComponent(id)}/transcript.${format}`,
+  transcriptionModels: () => request<WhisperModelOption[]>("/api/transcription/models"),
   importFromLink: (payload: LinkImportRequest) =>
     request<Project>("/api/projects/from-link", { method: "POST", body: JSON.stringify(payload) }),
   listExports: () => request<ExportedVideo[]>("/api/exports"),

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, Request
 
 from .. import __version__
 from ..ffmpeg import FFmpegNotFound, find_tools, tool_version
-from ..schemas import AppSettings, ExportedVideo, HealthInfo, SystemStats
+from ..transcription import engine_status
+from ..schemas import AppSettings, ExportedVideo, HealthInfo, SystemStats, WhisperModelOption
 from ..services import ProjectService
 from ..storage import SettingsStore
 from .deps import get_service, get_settings_store
@@ -27,6 +28,7 @@ def health(request: Request, store: Settings) -> HealthInfo:
         ffprobe_available=False,
         data_dir=str(request.app.state.config.data_dir),
     )
+    info.transcription_available, info.transcription_error = engine_status()
     try:
         tools = find_tools(store.get().ffmpeg_dir)
     except FFmpegNotFound as exc:
@@ -54,6 +56,12 @@ def get_settings(store: Settings) -> AppSettings:
 @router.put("/settings", response_model=AppSettings)
 def save_settings(body: AppSettings, store: Settings) -> AppSettings:
     return store.save(body)
+
+
+@router.get("/transcription/models", response_model=list[WhisperModelOption])
+def transcription_models(service: Service) -> list[WhisperModelOption]:
+    """Modelos disponíveis e quais já foram baixados para uso offline."""
+    return service.engine.catalog()
 
 
 @router.get("/exports", response_model=list[ExportedVideo])
