@@ -47,6 +47,14 @@ export function buildSteps(project: Project): Step[] {
       : problem && transcript && job?.kind === "detect_clips"
         ? "error"
         : "pending";
+  const renderState: StepState =
+    status === "rendering"
+      ? "active"
+      : clips && clips.rendered > 0
+        ? "done"
+        : problem && job?.kind === "render_clips"
+          ? "error"
+          : "pending";
   const later = (title: string, description: string): Step => ({ title, description, state: "unavailable" });
 
   return [
@@ -72,7 +80,14 @@ export function buildSteps(project: Project): Step[] {
         : "Pontuação heurística explicável a partir da transcrição.",
       state: clipsState,
     },
-    later("Legendas e formato vertical", "Legendas sincronizadas e 9:16 — Etapa 5."),
+    {
+      title: "Legendas e formato vertical",
+      description:
+        clips && clips.rendered > 0
+          ? `${clips.rendered} vídeo(s) gerado(s) com legendas`
+          : "Legendas sincronizadas e formato 9:16, 1:1 ou 16:9.",
+      state: renderState,
+    },
     later("Edição e exportação MP4", "Editor de cortes — Etapa 6."),
   ];
 }

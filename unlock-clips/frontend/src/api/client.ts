@@ -2,8 +2,11 @@ import type {
   AppSettings,
   Clip,
   ClipSet,
+  ClipFraming,
+  ClipSubtitles,
   ClipUpdate,
   ScoringCriterion,
+  SubtitleTemplateInfo,
   ExportedVideo,
   HealthInfo,
   LinkImportRequest,
@@ -96,6 +99,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+  renderClips: (id: string, clipIds?: string[]) =>
+    request<Project>(`/api/projects/${encodeURIComponent(id)}/clips/render`, {
+      method: "POST",
+      body: JSON.stringify(clipIds ? { clip_ids: clipIds } : {}),
+    }),
+  clipSubtitles: (id: string, clipId: string) =>
+    request<ClipSubtitles>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/subtitles`),
+  clipFraming: (id: string, clipId: string) =>
+    request<ClipFraming>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/framing`),
+  clipFrameUrl: (id: string, clipId: string, seconds: number) =>
+    `/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/frame.jpg?t=${seconds.toFixed(2)}`,
+  exportUrl: (id: string, filename: string) =>
+    `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`,
+  subtitleTemplates: () => request<SubtitleTemplateInfo[]>("/api/subtitle-templates"),
   deleteClip: (id: string, clipId: string) =>
     request<void>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}`, { method: "DELETE" }),
   importFromLink: (payload: LinkImportRequest) =>

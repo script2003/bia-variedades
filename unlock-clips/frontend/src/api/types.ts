@@ -65,6 +65,77 @@ export interface ScoreComponent {
   details: string[];
 }
 
+export interface RenderInfo {
+  filename: string;
+  aspect_ratio: AspectRatio;
+  width: number;
+  height: number;
+  duration_seconds: number;
+  size_bytes: number;
+  framing: FramingMode;
+  subtitle_style: SubtitleStyle;
+  subtitle_cues: number;
+  signature: string;
+  notes: string[];
+  created_at: string;
+  stale: boolean;
+}
+
+export interface SubtitleTemplateInfo {
+  key: SubtitleStyle;
+  label: string;
+  description: string;
+  font: string;
+  bold: boolean;
+  uppercase: boolean;
+  primary: string;
+  highlight: string;
+  outline_color: string;
+  outline: number;
+  shadow: number;
+  box: boolean;
+  box_color: string;
+  box_opacity: number;
+  size_factor: number;
+  highlight_scale: number;
+}
+
+export interface SubtitleWord {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface SubtitleCue {
+  start: number;
+  end: number;
+  lines: SubtitleWord[][];
+}
+
+export interface ClipSubtitles {
+  width: number;
+  height: number;
+  font_size: number;
+  alignment: number;
+  margin_v: number;
+  margin_h: number;
+  highlight: boolean;
+  template: SubtitleTemplateInfo;
+  cues: SubtitleCue[];
+}
+
+export interface ClipFraming {
+  mode: FramingMode;
+  source_width: number;
+  source_height: number;
+  crop_width: number;
+  crop_height: number;
+  x: number;
+  y: number;
+  keyframes: [number, number][];
+  notes: string[];
+}
+
 export interface Clip {
   id: string;
   title: string;
@@ -78,6 +149,7 @@ export interface Clip {
   status: ClipStatus;
   origin: "auto" | "manual";
   edited: boolean;
+  render: RenderInfo | null;
   created_at: string;
   updated_at: string;
 }
@@ -99,6 +171,7 @@ export interface ClipsSummary {
   count: number;
   approved: number;
   generated_at: string;
+  rendered: number;
 }
 
 export interface ClipUpdate {
@@ -117,7 +190,7 @@ export interface WhisperModelOption {
   path: string;
 }
 
-export type JobKind = "process" | "import_link" | "transcribe" | "detect_clips" | "validate";
+export type JobKind = "process" | "import_link" | "transcribe" | "detect_clips" | "render_clips" | "validate";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export interface JobInfo {
@@ -138,6 +211,7 @@ export type ProjectStatus =
   | "extracting_audio"
   | "transcribing"
   | "detecting_clips"
+  | "rendering"
   | "ready"
   | "failed"
   | "cancelled"
@@ -266,6 +340,8 @@ export interface ExportedVideo {
   size_bytes: number;
   created_at: string;
   url: string;
+  clip_id: string | null;
+  clip_title: string | null;
 }
 
 export interface SystemStats {
@@ -287,5 +363,7 @@ export interface HealthInfo {
   ffmpeg_error: string | null;
   transcription_available: boolean;
   transcription_error: string | null;
+  face_detection_available: boolean;
+  face_detection_error: string | null;
   data_dir: string;
 }

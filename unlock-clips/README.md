@@ -19,7 +19,7 @@ pagos.
 | 2 | Integração com FFmpeg e extração de áudio | ✅ Concluída |
 | 3 | Transcrição com timestamps (faster-whisper) | ✅ Concluída |
 | 4 | Identificação e seleção de cortes | ✅ Concluída |
-| 5 | Legendas e conversão para formatos verticais | Pendente |
+| 5 | Legendas e conversão para formatos verticais | ✅ Concluída |
 | 6 | Editor, exportação MP4 e gerenciamento | Pendente |
 | 7 | Testes, documentação e preparação para Windows | Pendente |
 
@@ -127,7 +127,32 @@ duração do áudio. Modelos maiores são mais precisos e mais lentos; com GPU N
 > Refinamento por IA generativa (LLM) não foi incluído para manter tudo gratuito e local. A arquitetura
 > permite acrescentá-lo como etapa opcional (ver "Próximos passos").
 
-As configurações de corte são salvas em cada projeto e serão usadas também pela Etapa 5 (legendas e formato).
+### O que a Etapa 5 acrescentou
+
+- **Geração do vídeo final** de cada corte (botão **Gerar vídeo**) ou de todos os aprovados de uma vez, em
+  segundo plano, com progresso real e cancelamento. Um único comando FFmpeg corta o trecho, enquadra, redimensiona,
+  incorpora as legendas e codifica em **MP4 H.264 + AAC** (compatível com TikTok, Reels e Shorts):
+  - **9:16** → 1080×1920 · **1:1** → 1080×1080 · **16:9** → 1920×1080.
+- **Legendas sincronizadas** a partir dos tempos de cada palavra:
+  - blocos de no máximo **2 linhas** que cabem na largura útil, divididos de forma equilibrada (sem palavras
+    soltas), encerrados no fim de frases, em pausas e após ~4 s;
+  - **destaque da palavra falada** (opcional), com cor própria e leve aumento;
+  - **4 modelos**: Destaque (caixa-alta, contorno grosso, verde-limão), Clássico, Caixa (faixa escura) e
+    Minimalista; tamanho e posição (inferior, centro, superior) configuráveis — no 9:16, "inferior" fica a 20% da
+    borda para não ficar sob os botões das redes sociais;
+  - em português (ou no idioma do projeto) e **embutidas no vídeo** (libass).
+- **Enquadramento**:
+  - **Central**: recorte fixo no centro;
+  - **Acompanhar rosto**: detecção com o modelo **YuNet** (OpenCV, incluído em `app/assets`, funciona offline),
+    2 amostras por segundo, filtro contra detecções isoladas e "câmera virtual" com zona morta — só se move quando
+    o rosto sai do centro, sem tremer. Sem rosto na maior parte do trecho, usa o enquadramento central e avisa.
+- **Prévia no formato** (antes de gerar): no navegador, com o mesmo recorte (inclusive o acompanhamento do rosto) e
+  a legenda sincronizada; e a aba **Quadro final (exato)**, que gera com o FFmpeg a imagem idêntica à do vídeo final.
+- Cada corte mostra **Vídeo pronto** / **Vídeo desatualizado** (quando o corte ou a configuração mudou depois da
+  geração), **Assistir** e **Baixar MP4**. Os arquivos também aparecem em **Vídeos exportados**.
+
+> O detector de rostos YuNet é distribuído sob licença MIT (`app/assets/face_detection_yunet_LICENSE.txt`).
+
 As etapas que ainda não existem aparecem como **"em breve"** na tela do projeto — nada é simulado como concluído.
 
 ## Estrutura de pastas
@@ -151,6 +176,10 @@ unlock-clips/
 │   │   ├── transcription.py      faster-whisper: blocos, progresso, modelos, SRT/VTT/TXT
 │   │   ├── clips.py              detecção e pontuação explicável dos cortes
 │   │   ├── clip_lexicon.py       expressões usadas pelos critérios (pt, en, es)
+│   │   ├── subtitles.py          blocos de legenda, modelos visuais e arquivo ASS
+│   │   ├── framing.py            recorte 9:16/1:1/16:9 e acompanhamento de rosto (YuNet)
+│   │   ├── render.py             geração do MP4 final e do quadro de prévia
+│   │   ├── assets/               modelo de detecção de rostos (YuNet, MIT)
 │   │   ├── links.py              política de links autorizados e download
 │   │   ├── services.py           regras de negócio dos projetos
 │   │   └── api/                  rotas HTTP (projetos e sistema)
@@ -170,8 +199,8 @@ unlock-clips/
 ```
 
 Cada projeto fica em `backend/data/projects/<id>/` com `project.json`, o vídeo original (`source.<ext>`),
-o áudio extraído (`audio.wav`), a miniatura (`thumbnail.jpg`), a transcrição (`transcript.json`) e, a partir
-da Etapa 6, a pasta `exports/`. Os modelos de transcrição ficam em `backend/data/models/<modelo>/`.
+o áudio extraído (`audio.wav`), a miniatura (`thumbnail.jpg`), a transcrição (`transcript.json`), os cortes
+(`clips.json`) e a pasta `exports/` com os MP4 gerados. Os modelos de transcrição ficam em `backend/data/models/<modelo>/`.
 
 ## Dependências
 
@@ -184,7 +213,8 @@ da Etapa 6, a pasta `exports/`. Os modelos de transcrição ficam em `backend/da
 | Modelo Whisper | baixado automaticamente | de 75 MB (tiny) a 3 GB (large-v3); padrão *small* = 484 MB |
 
 Pacotes Python: `fastapi`, `uvicorn[standard]`, `httpx`, `faster-whisper` (traz `ctranslate2`,
-`onnxruntime`, `tokenizers` e `huggingface_hub`) e `pytest` para testes.
+`onnxruntime`, `tokenizers` e `huggingface_hub`), `opencv-python-headless` (detecção de rostos) e `pytest`
+para testes. O FFmpeg precisa ter **libx264** e **libass** (as versões do `winget install Gyan.FFmpeg` têm).
 Pacotes npm: `react`, `react-dom`, `react-router-dom`, `lucide-react`; para desenvolvimento `vite`,
 `typescript`, `tailwindcss`, `@tailwindcss/vite`, `vitest`, `jsdom` e Testing Library.
 
@@ -300,12 +330,16 @@ erro ao carregar o modelo, volte para **CPU**.
 4. Quando o status ficar **Pronto**, revise os **Cortes sugeridos**: pré-visualize, veja por que cada trecho
    foi escolhido, ajuste início e fim, aprove ou descarte. A transcrição pode ser lida, pesquisada e baixada
    (SRT/VTT/TXT). Se mudar a duração ou a quantidade de cortes do projeto, clique em **Gerar novamente**.
+5. Escolha formato, estilo, tamanho e posição da legenda e o enquadramento em **Configurações dos cortes** (na
+   página do projeto), confira em **Prévia no formato** e clique em **Gerar vídeo** (ou **Gerar vídeos dos
+   aprovados**). Depois, **Assistir** ou **Baixar MP4**.
 
 Para importar por link: em **Configurações → Links autorizados**, cadastre os domínios das fontes que você
 tem direito de usar (por exemplo, o armazenamento do seu site). Depois, na aba **Usar link**, informe o
 link **direto** do arquivo de vídeo e confirme a autorização.
 
-> As legendas, o formato vertical e a exportação em MP4 serão adicionados nas Etapas 5 e 6.
+> A Etapa 6 trará o editor completo (legendas editáveis, ajuste manual do enquadramento) e o gerenciamento dos
+> vídeos exportados.
 
 ## Variáveis de ambiente (opcionais)
 
@@ -340,6 +374,11 @@ Exemplo no PowerShell: `$env:UNLOCK_DATA_DIR = "D:\UnlockClips\dados"` antes de 
 | POST | `/api/projects/{id}/clips` | criar corte manual (`start`, `end`, `title`) |
 | PATCH/DELETE | `/api/projects/{id}/clips/{clip_id}` | editar título, status, início/fim (recalcula) ou excluir |
 | GET | `/api/clip-scoring/criteria` | critérios da pontuação, descrições e pesos padrão |
+| POST | `/api/projects/{id}/clips/render` | gerar MP4 (`{"clip_ids": [...]}`; vazio = todos os aprovados) |
+| GET | `/api/projects/{id}/clips/{clip_id}/subtitles` | blocos de legenda do corte (para a prévia) |
+| GET | `/api/projects/{id}/clips/{clip_id}/framing` | enquadramento calculado (central ou por rosto) |
+| GET | `/api/projects/{id}/clips/{clip_id}/frame.jpg?t=` | quadro exato do vídeo final em `t` segundos do corte |
+| GET | `/api/subtitle-templates` | modelos de legenda |
 | GET | `/api/projects/{id}/source` | vídeo original (com suporte a `Range`) |
 | GET | `/api/projects/{id}/audio` | áudio extraído (WAV mono 16 kHz, com suporte a `Range`) |
 | GET | `/api/projects/{id}/thumbnail` | miniatura JPEG |
@@ -349,8 +388,8 @@ Documentação interativa: http://127.0.0.1:8000/docs
 
 ## Próximos passos
 
-- **Etapa 5** — legendas sincronizadas (com destaque da palavra atual) e conversão para 9:16, 1:1 e 16:9.
-- **Etapa 6** — editor dos cortes, exportação em MP4 e gerenciamento dos vídeos exportados.
+- **Etapa 6** — editor dos cortes (legendas editáveis, ajuste manual do enquadramento) e gerenciamento dos
+  vídeos exportados.
 - **Etapa 7** — testes finais, documentação e preparação para execução no Windows.
 - **Opcional** — refinamento das sugestões por IA generativa (por exemplo, para reescrever títulos ou
   reordenar candidatos). Não está incluído: exigiria um modelo local adicional ou uma API paga, que seria

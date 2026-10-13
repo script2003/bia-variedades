@@ -28,6 +28,7 @@ describe("ProjectDetailPage", () => {
     );
     renderPage(project.id);
     expect(await screen.findByText(/Cortes sugeridos\. Revise/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Gerar vídeos dos aprovados \(1\)/ })).toBeInTheDocument();
     expect(await screen.findByRole("article", { name: /Corte 1: Por que a maioria/ })).toBeInTheDocument();
     expect(await screen.findByText("Hoje vamos falar de educação.")).toBeInTheDocument();
     expect(screen.getByLabelText("Áudio extraído")).toBeInTheDocument();

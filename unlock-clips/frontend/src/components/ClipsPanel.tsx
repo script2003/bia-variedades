@@ -11,13 +11,17 @@ import {
   Scissors,
   Sparkles,
   Trash2,
+  Clapperboard,
+  Download,
+  Smartphone,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../api/client";
 import type { Clip, ClipSet, ClipStatus, ClipUpdate, Project } from "../api/types";
-import { formatDuration, formatTimecode, parseTimecode } from "../lib/format";
+import { formatBytes, formatDuration, formatTimecode, parseTimecode } from "../lib/format";
 import { canDetectClips } from "../lib/projects";
+import ClipPreview from "./ClipPreview";
 import Notice from "./Notice";
 
 interface Props {
@@ -183,6 +187,10 @@ function ClipCard({
   onPreview,
   onUpdate,
   onDelete,
+  canRender,
+  exportUrl,
+  onRender,
+  onOpenFormat,
 }: {
   clip: Clip;
   rank: number;
@@ -190,6 +198,10 @@ function ClipCard({
   onPreview: (start: number, end: number) => void;
   onUpdate: (clip: Clip, data: ClipUpdate) => Promise<void>;
   onDelete: (clip: Clip) => Promise<void>;
+  canRender: boolean;
+  exportUrl: string | null;
+  onRender: (clip: Clip) => void;
+  onOpenFormat: (clip: Clip, tab: "live" | "rendered") => void;
 }) {
   const [showScore, setShowScore] = useState(false);
   const [editingRange, setEditingRange] = useState(false);
@@ -296,6 +308,9 @@ function ClipCard({
         <button type="button" className="btn btn-secondary px-3 py-1.5 text-xs" onClick={() => onPreview(clip.start, clip.end)}>
           <Play className="size-3.5" aria-hidden /> Pré-visualizar
         </button>
+        <button type="button" className="btn btn-secondary px-3 py-1.5 text-xs" onClick={() => onOpenFormat(clip, "live")}>
+          <Smartphone className="size-3.5" aria-hidden /> Prévia no formato
+        </button>
         {clip.status !== "approved" && (
           <button type="button" className="btn btn-secondary px-3 py-1.5 text-xs" onClick={() => onUpdate(clip, { status: "approved" })}>
             <Check className="size-3.5" aria-hidden /> Aprovar
@@ -322,6 +337,44 @@ function ClipCard({
         </button>
       </div>
 
+      {clip.status !== "rejected" && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink-700 pt-3 text-xs">
+          {clip.render ? (
+            <>
+              <span
+                className={`rounded-full px-2 py-0.5 font-semibold ${clip.render.stale ? "bg-amber-500/15 text-amber-300" : "bg-brand-400/15 text-brand-300"}`}
+              >
+                {clip.render.stale ? "Vídeo desatualizado" : "Vídeo pronto"}
+              </span>
+              <span className="text-zinc-500">
+                {clip.render.width}×{clip.render.height} · {formatBytes(clip.render.size_bytes)}
+                {clip.render.framing === "rosto" ? " · rosto acompanhado" : ""}
+              </span>
+              <button type="button" className="btn btn-secondary px-3 py-1.5 text-xs" onClick={() => onOpenFormat(clip, "rendered")}>
+                <Play className="size-3.5" aria-hidden /> Assistir
+              </button>
+              {exportUrl && (
+                <a href={exportUrl} download className="btn btn-secondary px-3 py-1.5 text-xs">
+                  <Download className="size-3.5" aria-hidden /> Baixar MP4
+                </a>
+              )}
+            </>
+          ) : (
+            <span className="text-zinc-500">Vídeo ainda não gerado.</span>
+          )}
+          {canRender && (
+            <button type="button" className="btn btn-primary ml-auto px-3 py-1.5 text-xs" onClick={() => onRender(clip)}>
+              <Clapperboard className="size-3.5" aria-hidden /> {clip.render ? "Gerar novamente" : "Gerar vídeo"}
+            </button>
+          )}
+        </div>
+      )}
+      {clip.render?.notes.map((note) => (
+        <p key={note} className="mt-2 text-xs text-amber-200/90">
+          {note}
+        </p>
+      ))}
+
       {editingRange && (
         <RangeEditor
           clip={clip}
@@ -343,7 +396,12 @@ export default function ClipsPanel({ project, currentTime, onPreview, onProjectC
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [busy, setBusy] = useState(false);
-  const version = project.clips?.generated_at ?? null;
+  const [formatPreview, setFormatPreview] = useState<{ clip: Clip; tab: "live" | "rendered" } | null>(null);
+  // Recarrega quando as sugestões mudam, quando uma tarefa termina (ex.: vídeos gerados) e quando a
+  // configuração do projeto muda (o servidor recalcula quais vídeos ficaram desatualizados).
+  const version = project.clips
+    ? [project.clips.generated_at, project.clips.rendered, project.job?.id, project.job?.status, JSON.stringify(project.settings)].join("|")
+    : null;
 
   useEffect(() => {
     if (!version) {
@@ -417,6 +475,17 @@ export default function ClipsPanel({ project, currentTime, onPreview, onProjectC
     }
   };
 
+  const render = async (ids?: string[]) => {
+    setBusy(true);
+    try {
+      onProjectChange(await api.renderClips(project.id, ids));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const regenerate = async () => {
     if (
       clipSet &&
@@ -467,6 +536,11 @@ export default function ClipsPanel({ project, currentTime, onPreview, onProjectC
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {clipSet && editable && counts.approved > 0 && (
+            <button type="button" className="btn btn-primary px-3 py-1.5 text-xs" onClick={() => render()} disabled={busy}>
+              <Clapperboard className="size-3.5" aria-hidden /> Gerar vídeos dos aprovados ({counts.approved})
+            </button>
+          )}
           {clipSet && editable && (
             <button type="button" className="btn btn-secondary px-3 py-1.5 text-xs" onClick={addManual} disabled={busy}>
               <Plus className="size-3.5" aria-hidden /> Adicionar corte em {formatDuration(currentTime)}
@@ -530,11 +604,23 @@ export default function ClipsPanel({ project, currentTime, onPreview, onProjectC
                 onPreview={onPreview}
                 onUpdate={update}
                 onDelete={remove}
+                canRender={editable}
+                exportUrl={clip.render ? api.exportUrl(project.id, clip.render.filename) : null}
+                onRender={(c) => render([c.id])}
+                onOpenFormat={(c, tab) => setFormatPreview({ clip: c, tab })}
               />
             ))}
             {visible.length === 0 && clips.length > 0 && <p className="text-sm text-zinc-500">Nenhum corte neste filtro.</p>}
           </div>
         </>
+      )}
+      {formatPreview && (
+        <ClipPreview
+          project={project}
+          clip={formatPreview.clip}
+          initialTab={formatPreview.tab}
+          onClose={() => setFormatPreview(null)}
+        />
       )}
     </section>
   );

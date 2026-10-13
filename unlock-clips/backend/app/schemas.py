@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 DurationPreset = Literal["15-30", "30-60", "60-90"]
 AspectRatio = Literal["9:16", "1:1", "16:9"]
@@ -18,7 +18,7 @@ SubtitlePosition = Literal["inferior", "centro", "superior"]
 FramingMode = Literal["centro", "rosto"]
 
 # "validate" é mantido para ler projetos criados na Etapa 1.
-JobKind = Literal["process", "import_link", "transcribe", "detect_clips", "validate"]
+JobKind = Literal["process", "import_link", "transcribe", "detect_clips", "render_clips", "validate"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled", "interrupted"]
 ACTIVE_JOB_STATUSES: frozenset[str] = frozenset({"queued", "running"})
 
@@ -28,6 +28,7 @@ ProjectStatus = Literal[
     "extracting_audio",  # lendo a mídia com FFprobe e extraindo o áudio com FFmpeg
     "transcribing",  # transcrevendo o áudio com faster-whisper
     "detecting_clips",  # procurando os melhores trechos na transcrição
+    "rendering",  # gerando os vídeos dos cortes (legendas + formato)
     "ready",  # etapas concluídas até o momento (áudio extraído e, se ativado, transcrito)
     "failed",
     "cancelled",
@@ -332,6 +333,24 @@ class ScoreComponent(BaseModel):
     details: list[str] = Field(default_factory=list)
 
 
+class RenderInfo(BaseModel):
+    """Vídeo MP4 gerado para um corte (pasta ``exports`` do projeto)."""
+
+    filename: str
+    aspect_ratio: AspectRatio
+    width: int
+    height: int
+    duration_seconds: float
+    size_bytes: int
+    framing: FramingMode
+    subtitle_style: SubtitleStyle
+    subtitle_cues: int
+    signature: str  # configuração usada; se mudar, o vídeo fica desatualizado
+    notes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    stale: bool = False  # calculado ao consultar
+
+
 class Clip(BaseModel):
     id: str = Field(default_factory=lambda: new_id()[:12])
     title: str
@@ -345,6 +364,7 @@ class Clip(BaseModel):
     status: ClipStatus = "suggested"
     origin: Literal["auto", "manual"] = "auto"
     edited: bool = False
+    render: RenderInfo | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -372,6 +392,7 @@ class ClipsSummary(BaseModel):
     count: int
     approved: int
     generated_at: datetime
+    rendered: int = 0
 
 
 class ClipCreate(BaseModel):
@@ -396,6 +417,72 @@ class DetectClipsRequest(BaseModel):
 
     # Mantém cortes aprovados e criados manualmente ao gerar novas sugestões.
     keep_curated: bool = True
+
+
+class RenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Cortes a gerar; vazio = todos os aprovados.
+    clip_ids: list[str] | None = Field(default=None, max_length=100)
+
+
+class SubtitleTemplateInfo(BaseModel):
+    key: SubtitleStyle
+    label: str
+    description: str
+    font: str
+    bold: bool
+    uppercase: bool
+    primary: str
+    highlight: str
+    outline_color: str
+    outline: float
+    shadow: float
+    box: bool
+    box_color: str
+    box_opacity: float
+    size_factor: float
+    highlight_scale: int
+
+
+class SubtitleWordOut(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class SubtitleCueOut(BaseModel):
+    start: float
+    end: float
+    lines: list[list[SubtitleWordOut]]
+
+
+class ClipSubtitles(BaseModel):
+    """Legendas de um corte já divididas em blocos, para a prévia no navegador."""
+
+    width: int
+    height: int
+    font_size: int
+    alignment: int
+    margin_v: int
+    margin_h: int
+    highlight: bool
+    template: SubtitleTemplateInfo
+    cues: list[SubtitleCueOut]
+
+
+class ClipFraming(BaseModel):
+    """Enquadramento calculado para um corte (o mesmo usado ao gerar o vídeo)."""
+
+    mode: FramingMode
+    source_width: int
+    source_height: int
+    crop_width: int
+    crop_height: int
+    x: float
+    y: int
+    keyframes: list[tuple[float, float]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class ScoringCriterion(BaseModel):
@@ -457,6 +544,8 @@ class ExportedVideo(BaseModel):
     size_bytes: int
     created_at: datetime
     url: str
+    clip_id: str | None = None
+    clip_title: str | None = None
 
 
 class WhisperModelOption(BaseModel):
@@ -487,4 +576,6 @@ class HealthInfo(BaseModel):
     ffmpeg_error: str | None = None
     transcription_available: bool = False
     transcription_error: str | None = None
+    face_detection_available: bool = False
+    face_detection_error: str | None = None
     data_dir: str

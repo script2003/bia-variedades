@@ -735,6 +735,7 @@ def detect_clips(
         )
         rescored.id = clip.id
         rescored.created_at = clip.created_at
+        rescored.render = clip.render
         kept.append(rescored)
 
     sentences = analyzer.sentences

@@ -251,8 +251,13 @@ def run_ffmpeg(
     progress_start: float = 0.0,
     progress_end: float = 1.0,
     message: str = "Processando com FFmpeg",
+    cwd: Path | None = None,
 ) -> None:
-    """Executa o FFmpeg reportando o progresso real com base no tempo processado."""
+    """Executa o FFmpeg reportando o progresso real com base no tempo processado.
+
+    ``cwd`` permite referenciar arquivos auxiliares (ex.: legendas) por nome relativo dentro
+    dos filtros, evitando o escape de caminhos do Windows ("C:\\...") no filtergraph.
+    """
     ctx.check_cancelled()
     cmd = [tools.ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", *args]
     try:
@@ -265,6 +270,7 @@ def run_ffmpeg(
             encoding="utf-8",
             errors="replace",
             creationflags=_CREATION_FLAGS,
+            cwd=str(cwd) if cwd else None,
         )
     except OSError as exc:
         raise FFmpegNotFound(f"Não foi possível executar o FFmpeg: {exc}") from exc

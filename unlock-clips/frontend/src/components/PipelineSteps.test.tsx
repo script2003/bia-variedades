@@ -16,7 +16,31 @@ describe("buildSteps", () => {
     expect(steps[4]!.description).toBe("9 palavras · modelo small");
     expect(steps[5]!.state).toBe("done");
     expect(steps[5]!.description).toBe("2 corte(s) sugerido(s) · 1 aprovado(s)");
-    expect(steps.slice(6).every((s) => s.state === "unavailable")).toBe(true);
+    expect(steps[6]!.state).toBe("pending"); // nenhum vídeo gerado ainda
+    expect(steps.slice(7).every((s) => s.state === "unavailable")).toBe(true);
+  });
+
+  it("acompanha a geração dos vídeos", () => {
+    const renderState = (project: Project) => buildSteps(project)[6]!.state;
+    const summary = base.clips!;
+    expect(renderState(makeProject({ status: "rendering" }))).toBe("active");
+    expect(renderState(makeProject({ clips: { ...summary, rendered: 2 } }))).toBe("done");
+    expect(buildSteps(makeProject({ clips: { ...summary, rendered: 2 } }))[6]!.description).toBe("2 vídeo(s) gerado(s) com legendas");
+    const failed = makeProject({
+      status: "failed",
+      job: {
+        id: "j",
+        kind: "render_clips",
+        status: "failed",
+        progress: 0.5,
+        message: "Falhou",
+        error: "x",
+        created_at: base.created_at,
+        started_at: base.created_at,
+        finished_at: base.created_at,
+      },
+    });
+    expect(renderState(failed)).toBe("error");
   });
 
   it("acompanha a detecção de cortes", () => {
@@ -101,6 +125,7 @@ describe("PipelineSteps", () => {
     expect(screen.getByLabelText("Extração de áudio: concluída")).toBeInTheDocument();
     expect(screen.getByLabelText("Transcrição com timestamps: concluída")).toBeInTheDocument();
     expect(screen.getByLabelText("Identificação de cortes: concluída")).toBeInTheDocument();
-    expect(screen.getByLabelText("Legendas e formato vertical: disponível em breve")).toBeInTheDocument();
+    expect(screen.getByLabelText("Legendas e formato vertical: aguardando")).toBeInTheDocument();
+    expect(screen.getByLabelText("Edição e exportação MP4: disponível em breve")).toBeInTheDocument();
   });
 });

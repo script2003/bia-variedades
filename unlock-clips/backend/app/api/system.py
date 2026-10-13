@@ -10,7 +10,17 @@ from .. import __version__
 from ..ffmpeg import FFmpegNotFound, find_tools, tool_version
 from ..transcription import engine_status
 from ..clips import criteria
-from ..schemas import AppSettings, ExportedVideo, HealthInfo, ScoringCriterion, SystemStats, WhisperModelOption
+from ..framing import face_detection_status
+from ..subtitles import TEMPLATES
+from ..schemas import (
+    AppSettings,
+    ExportedVideo,
+    HealthInfo,
+    ScoringCriterion,
+    SubtitleTemplateInfo,
+    SystemStats,
+    WhisperModelOption,
+)
 from ..services import ProjectService
 from ..storage import SettingsStore
 from .deps import get_service, get_settings_store
@@ -30,6 +40,7 @@ def health(request: Request, store: Settings) -> HealthInfo:
         data_dir=str(request.app.state.config.data_dir),
     )
     info.transcription_available, info.transcription_error = engine_status()
+    info.face_detection_available, info.face_detection_error = face_detection_status()
     try:
         tools = find_tools(store.get().ffmpeg_dir)
     except FFmpegNotFound as exc:
@@ -69,6 +80,12 @@ def transcription_models(service: Service) -> list[WhisperModelOption]:
 def scoring_criteria() -> list[ScoringCriterion]:
     """Critérios da pontuação heurística dos cortes, com descrição e peso padrão."""
     return criteria()
+
+
+@router.get("/subtitle-templates", response_model=list[SubtitleTemplateInfo])
+def subtitle_templates() -> list[SubtitleTemplateInfo]:
+    """Modelos de legenda disponíveis, com cores e características para a prévia."""
+    return [SubtitleTemplateInfo(**template.__dict__) for template in TEMPLATES.values()]
 
 
 @router.get("/exports", response_model=list[ExportedVideo])

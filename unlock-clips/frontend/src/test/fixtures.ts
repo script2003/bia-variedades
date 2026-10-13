@@ -1,4 +1,14 @@
-import type { AppSettings, Clip, ClipSet, ClipSettings, Project, ScoringCriterion, Transcript } from "../api/types";
+import type {
+  AppSettings,
+  Clip,
+  ClipSet,
+  ClipSettings,
+  ClipSubtitles,
+  Project,
+  RenderInfo,
+  ScoringCriterion,
+  Transcript,
+} from "../api/types";
 
 export const clipDefaults: ClipSettings = {
   duration: "30-60",
@@ -84,7 +94,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
       duration_seconds: 3725,
       created_at: "2026-10-10T12:30:00Z",
     },
-    clips: { filename: "clips.json", count: 2, approved: 1, generated_at: "2026-10-10T12:31:00Z" },
+    clips: { filename: "clips.json", count: 2, approved: 1, generated_at: "2026-10-10T12:31:00Z", rendered: 0 },
     job: null,
     warnings: [],
     error: null,
@@ -124,6 +134,7 @@ export function makeClip(overrides: Partial<Clip> = {}): Clip {
     status: "suggested",
     origin: "auto",
     edited: false,
+    render: null,
     created_at: "2026-10-10T12:31:00Z",
     updated_at: "2026-10-10T12:31:00Z",
     ...overrides,
@@ -152,6 +163,67 @@ export const sampleClipSet: ClipSet = {
       text: "Uma vez eu perdi todo o meu dinheiro.",
     }),
     makeClip({ id: "clip-3", title: "Trecho descartado", start: 100, end: 118, score: 20, status: "rejected", text: "e aí tipo" }),
+  ],
+};
+
+export function makeRender(overrides: Partial<RenderInfo> = {}): RenderInfo {
+  return {
+    filename: "por-que-a-maioria-clip-1-9x16.mp4",
+    aspect_ratio: "9:16",
+    width: 1080,
+    height: 1920,
+    duration_seconds: 20.1,
+    size_bytes: 4_200_000,
+    framing: "rosto",
+    subtitle_style: "destaque",
+    subtitle_cues: 7,
+    signature: "abc",
+    notes: [],
+    created_at: "2026-10-10T13:00:00Z",
+    stale: false,
+    ...overrides,
+  };
+}
+
+export const sampleSubtitles: ClipSubtitles = {
+  width: 1080,
+  height: 1920,
+  font_size: 64,
+  alignment: 2,
+  margin_v: 384,
+  margin_h: 76,
+  highlight: true,
+  template: {
+    key: "destaque",
+    label: "Destaque",
+    description: "Letras grandes",
+    font: "Arial",
+    bold: true,
+    uppercase: true,
+    primary: "#FFFFFF",
+    highlight: "#C4F34A",
+    outline_color: "#000000",
+    outline: 6,
+    shadow: 2,
+    box: false,
+    box_color: "#000000",
+    box_opacity: 0,
+    size_factor: 1,
+    highlight_scale: 108,
+  },
+  cues: [
+    {
+      start: 0,
+      end: 1.6,
+      lines: [
+        [
+          { start: 0, end: 0.4, text: "POR" },
+          { start: 0.4, end: 0.8, text: "QUE" },
+          { start: 0.8, end: 1.4, text: "GUARDAR" },
+        ],
+      ],
+    },
+    { start: 2, end: 3, lines: [[{ start: 2, end: 3, text: "DINHEIRO?" }]] },
   ],
 };
 

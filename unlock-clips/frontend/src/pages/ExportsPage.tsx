@@ -22,7 +22,7 @@ export default function ExportsPage() {
         <p className="text-sm text-zinc-500">Carregando…</p>
       ) : !data || data.length === 0 ? (
         <EmptyState icon={Film} title="Nenhum vídeo exportado ainda">
-          Os cortes exportados em MP4 aparecerão aqui. A exportação será habilitada com o editor de cortes (Etapa 6).
+          Os cortes exportados em MP4 aparecerão aqui. Gere os vídeos na página de um projeto, no painel “Cortes sugeridos”.
         </EmptyState>
       ) : (
         <ul className="card divide-y divide-ink-700">
@@ -30,7 +30,8 @@ export default function ExportsPage() {
             <li key={item.url} className="flex items-center gap-4 px-5 py-4">
               <Film className="size-5 shrink-0 text-brand-400" aria-hidden />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold">{item.filename}</p>
+                <p className="truncate font-semibold">{item.clip_title ?? item.filename}</p>
+                {item.clip_title && <p className="truncate font-mono text-[11px] text-zinc-500">{item.filename}</p>}
                 <p className="truncate text-xs text-zinc-500">
                   <Link to={`/projetos/${item.project_id}`} className="hover:text-zinc-300">
                     {item.project_title}

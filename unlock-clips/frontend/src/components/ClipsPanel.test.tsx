@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Project } from "../api/types";
-import { makeClip, makeProject, mockFetch, sampleClipSet } from "../test/fixtures";
+import { makeClip, makeProject, makeRender, mockFetch, sampleClipSet, sampleSubtitles } from "../test/fixtures";
 import ClipsPanel from "./ClipsPanel";
 
 const project = makeProject();
@@ -161,5 +161,46 @@ describe("ClipsPanel", () => {
     expect(screen.getByText(/A transcrição está pronta/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Sugerir cortes" }));
     expect(calls.map((c) => c.key)).toEqual([`POST ${base}/clips/detect`]);
+  });
+});
+
+describe("ClipsPanel — vídeos", () => {
+  it("gera o vídeo de um corte e dos aprovados", async () => {
+    const user = userEvent.setup();
+    const rendering: Project = { ...project, status: "rendering" };
+    const { calls, onProjectChange } = setup({ [`POST ${base}/clips/render`]: () => ({ body: rendering }) });
+    const first = await screen.findByRole("article", { name: /Corte 1/ });
+    expect(within(first).getByText("Vídeo ainda não gerado.")).toBeInTheDocument();
+    await user.click(within(first).getByRole("button", { name: /Gerar vídeo/ }));
+    expect(body(calls, `POST ${base}/clips/render`)).toEqual({ clip_ids: ["clip-1"] });
+    expect(onProjectChange).toHaveBeenCalledWith(rendering);
+    await user.click(screen.getByRole("button", { name: /Gerar vídeos dos aprovados \(1\)/ }));
+    expect(JSON.parse(String(calls.filter((c) => c.key === `POST ${base}/clips/render`)[1]!.init?.body))).toEqual({});
+  });
+
+  it("mostra vídeo pronto, desatualizado, download e abre a prévia", async () => {
+    const user = userEvent.setup();
+    const withRenders = {
+      ...sampleClipSet,
+      clips: [
+        makeClip({ render: makeRender() }),
+        makeClip({ id: "clip-2", title: "Outro", status: "approved", render: makeRender({ filename: "outro.mp4", stale: true }) }),
+      ],
+    };
+    setup({
+      [`GET ${base}/clips`]: () => ({ body: withRenders }),
+      [`GET ${base}/clips/clip-1/subtitles`]: () => ({ body: sampleSubtitles }),
+    });
+    const first = await screen.findByRole("article", { name: /Corte 1/ });
+    expect(within(first).getByText("Vídeo pronto")).toBeInTheDocument();
+    expect(within(first).getByText(/1080×1920 · 4,0 MB · rosto acompanhado/)).toBeInTheDocument();
+    expect(within(first).getByRole("link", { name: /Baixar MP4/ })).toHaveAttribute(
+      "href",
+      `${base}/exports/por-que-a-maioria-clip-1-9x16.mp4`,
+    );
+    expect(within(screen.getByRole("article", { name: /Outro/ })).getByText("Vídeo desatualizado")).toBeInTheDocument();
+    await user.click(within(first).getByRole("button", { name: "Assistir" }));
+    expect(await screen.findByRole("dialog", { name: /Prévia:/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Vídeo gerado" })).toHaveAttribute("aria-selected", "true");
   });
 });

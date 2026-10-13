@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import ValidationError
 
@@ -12,12 +13,15 @@ from ..schemas import (
     Clip,
     ClipCreate,
     ClipSet,
+    ClipFraming,
     ClipSettings,
+    ClipSubtitles,
     ClipUpdate,
     DetectClipsRequest,
     LinkImportRequest,
     Project,
     ProjectUpdate,
+    RenderRequest,
     Transcript,
 )
 from ..transcription import to_srt, to_text, to_vtt
@@ -168,6 +172,33 @@ def update_clip(project_id: str, clip_id: str, body: ClipUpdate, service: Servic
 def delete_clip(project_id: str, clip_id: str, service: Service) -> Response:
     service.delete_clip(project_id, clip_id)
     return Response(status_code=204)
+
+
+@router.post("/{project_id}/clips/render", response_model=Project)
+def render_clips(project_id: str, service: Service, body: RenderRequest | None = None) -> Project:
+    """Gera os vídeos MP4 (formato + legendas embutidas). Sem ``clip_ids``, gera todos os aprovados."""
+    return service.render(project_id, (body or RenderRequest()).clip_ids)
+
+
+@router.get("/{project_id}/clips/{clip_id}/subtitles", response_model=ClipSubtitles)
+def clip_subtitles(project_id: str, clip_id: str, service: Service) -> ClipSubtitles:
+    """Blocos de legenda do corte (tempos relativos ao início), para a prévia no navegador."""
+    return service.clip_subtitles(project_id, clip_id)
+
+
+@router.get("/{project_id}/clips/{clip_id}/framing", response_model=ClipFraming)
+async def clip_framing(project_id: str, clip_id: str, service: Service) -> ClipFraming:
+    """Posição do recorte ao longo do corte (acompanhamento de rosto), para a prévia ao vivo."""
+    return await run_in_threadpool(service.clip_framing, project_id, clip_id)
+
+
+@router.get("/{project_id}/clips/{clip_id}/frame.jpg")
+async def clip_frame(
+    project_id: str, clip_id: str, service: Service, t: Annotated[float, Query(ge=0, le=600)] = 0.0
+) -> Response:
+    """Quadro do corte renderizado pelo FFmpeg exatamente como no vídeo final."""
+    data = await run_in_threadpool(service.clip_frame, project_id, clip_id, t)
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/{project_id}/thumbnail")

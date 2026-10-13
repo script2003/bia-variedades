@@ -237,10 +237,16 @@ function ProjectDetail({ projectId }: { projectId: string }) {
             {warning}
           </Notice>
         ))}
-        {project.status === "ready" && project.clips && (
+        {project.status === "ready" && project.clips && project.clips.rendered === 0 && (
           <Notice tone="success">
-            Cortes sugeridos. Revise, ajuste e aprove os melhores trechos. A geração das legendas e do formato vertical chega
-            na próxima etapa do desenvolvimento.
+            Cortes sugeridos. Revise, ajuste e aprove os melhores trechos; depois use <strong>Gerar vídeo</strong> para criar
+            o MP4 com legendas no formato escolhido.
+          </Notice>
+        )}
+        {project.status === "ready" && project.clips && project.clips.rendered > 0 && (
+          <Notice tone="success">
+            {project.clips.rendered} vídeo(s) com legendas gerado(s). Assista e baixe pelo painel de cortes ou em{" "}
+            <strong>Vídeos exportados</strong>.
           </Notice>
         )}
         {project.status === "ready" && project.transcript && !project.clips && (

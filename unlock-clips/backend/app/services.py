@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import re
 import shutil
 import threading
+import unicodedata
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +27,7 @@ from .ffmpeg import (
     probe,
     require_processable,
 )
-from .jobs import JobContext, JobManager
+from .jobs import JobContext, JobError, JobManager
 from .links import (
     ClientFactory,
     LinkPolicyError,
@@ -58,8 +62,15 @@ from .schemas import (
     Clip,
     ClipCreate,
     ClipSet,
+    ClipSettings,
     ClipsSummary,
+    ClipFraming,
+    ClipSubtitles,
     ClipUpdate,
+    RenderInfo,
+    SubtitleCueOut,
+    SubtitleTemplateInfo,
+    SubtitleWordOut,
     SourceInfo,
     SystemStats,
     Transcript,
@@ -69,12 +80,16 @@ from .schemas import (
 )
 from .storage import ProjectNotFound, ProjectStore, SettingsStore, atomic_write_text, is_valid_project_id
 from .clips import ClipAnalyzer, detect_clips, partial_energy
+from .framing import OUTPUT_SIZES, center_plan, face_plan
+from .render import plan_subtitles, render_clip, render_frame
+from .subtitles import TEMPLATES
 from .transcription import WhisperEngine
 
 logger = logging.getLogger(__name__)
 
 TRANSCRIPT_FILENAME = "transcript.json"
 CLIPS_FILENAME = "clips.json"
+_SLUG_INVALID = re.compile(r"[^a-z0-9]+")
 MAX_CLIP_SECONDS = 180.0
 MIN_CLIP_SECONDS = 1.0
 INTERRUPTED_MESSAGE = (
@@ -121,6 +136,7 @@ class ProjectService:
         self._job_projects: dict[str, str] = {}
         self._job_lock = threading.Lock()
         self._clips_lock = threading.RLock()
+        self._framing_cache: dict[tuple, ClipFraming] = {}
         self.jobs = JobManager(listener=self, max_workers=config.max_workers)
 
     # ------------------------------------------------------------------ consultas
@@ -153,7 +169,108 @@ class ProjectService:
         clip_set = self._load_clips(project)
         if clip_set is None:
             raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
+        exports = self.store.exports_dir(project_id)
+        for clip in clip_set.clips:
+            if clip.render is None:
+                continue
+            if not (exports / clip.render.filename).is_file():
+                clip.render = None  # arquivo removido fora da aplicação
+            else:
+                clip.render.stale = clip.render.signature != self._render_signature(project, clip)
         return clip_set
+
+    # ------------------------------------------------------------------ vídeos dos cortes
+
+    def render(self, project_id: str, clip_ids: list[str] | None) -> Project:
+        """Gera os MP4 (legendas + formato) dos cortes indicados ou de todos os aprovados."""
+        project = self.get(project_id)
+        if project.job is not None and self.jobs.is_active(project.job.id):
+            raise ServiceError(409, "Já existe uma tarefa em andamento neste projeto.")
+        if project.transcript is None or project.media is None or not project.source.filename:
+            raise ServiceError(409, "O vídeo precisa estar processado e transcrito antes de gerar os cortes.")
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(409, "Gere as sugestões de cortes antes de gerar os vídeos.")
+        by_id = {c.id: c for c in clip_set.clips}
+        if clip_ids:
+            missing = [cid for cid in clip_ids if cid not in by_id]
+            if missing:
+                raise ServiceError(404, f"Corte não encontrado: {missing[0]}")
+            ids = list(dict.fromkeys(clip_ids))
+        else:
+            ids = [c.id for c in clip_set.clips if c.status == "approved"]
+            if not ids:
+                raise ServiceError(409, "Aprove pelo menos um corte (ou escolha um corte) para gerar o vídeo.")
+        return self._start_job(project_id, "render_clips", "rendering", self._render_task(project_id, ids))
+
+    def clip_frame(self, project_id: str, clip_id: str, at: float) -> bytes:
+        """Quadro JPEG do corte exatamente como ficará no vídeo final (formato + legenda)."""
+        project, clip, transcript, tools, source = self._render_context(project_id, clip_id)
+        try:
+            return render_frame(tools, source, project.media, transcript, clip.start, clip.end, project.settings, at)
+        except JobError as exc:
+            raise ServiceError(422, str(exc)) from exc
+
+    def clip_framing(self, project_id: str, clip_id: str) -> ClipFraming:
+        """Enquadramento do corte (por rosto ou central), com cache, para a prévia ao vivo."""
+        project, clip, _transcript, tools, source = self._render_context(project_id, clip_id)
+        assert project.media is not None and project.media.video is not None
+        src_w, src_h = project.media.video.display_size
+        aspect, mode = project.settings.aspect_ratio, project.settings.framing
+        key = (project_id, project.source.sha256, round(clip.start, 3), round(clip.end, 3), aspect, mode)
+        cached = self._framing_cache.get(key)
+        if cached is not None:
+            return cached
+        if mode == "rosto":
+            ctx = JobContext(f"framing-{clip_id}", threading.Event(), lambda p, m: None)
+            try:
+                plan = face_plan(ctx, tools, source, clip.start, clip.end - clip.start, src_w, src_h, aspect)
+            except JobError as exc:
+                raise ServiceError(422, str(exc)) from exc
+        else:
+            plan = center_plan(src_w, src_h, aspect)
+        framing = ClipFraming(
+            mode=plan.mode,  # type: ignore[arg-type]
+            source_width=src_w,
+            source_height=src_h,
+            crop_width=plan.crop_w,
+            crop_height=plan.crop_h,
+            x=round(plan.x, 1),
+            y=plan.y,
+            keyframes=[(round(t, 3), round(x, 1)) for t, x in plan.keyframes],
+            notes=plan.notes,
+        )
+        if len(self._framing_cache) > 64:
+            self._framing_cache.clear()
+        self._framing_cache[key] = framing
+        return framing
+
+    def clip_subtitles(self, project_id: str, clip_id: str) -> ClipSubtitles:
+        project = self.get(project_id)
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
+        clip = clip_set.clips[self._clip_index(clip_set, clip_id)]
+        plan = plan_subtitles(self.get_transcript(project_id), clip.start, clip.end, project.settings)
+        template = TEMPLATES[plan.template_key]
+        return ClipSubtitles(
+            width=plan.layout.width,
+            height=plan.layout.height,
+            font_size=plan.layout.font_size,
+            alignment=plan.layout.alignment,
+            margin_v=plan.layout.margin_v,
+            margin_h=plan.layout.margin_h,
+            highlight=plan.highlight,
+            template=SubtitleTemplateInfo(**template.__dict__),
+            cues=[
+                SubtitleCueOut(
+                    start=round(cue.start, 3),
+                    end=round(cue.end, 3),
+                    lines=[[SubtitleWordOut(start=round(w.start, 3), end=round(w.end, 3), text=w.text) for w in line] for line in cue.lines],
+                )
+                for cue in plan.cues
+            ],
+        )
 
     def detect(self, project_id: str, keep_curated: bool = True) -> Project:
         """Gera (ou refaz) as sugestões de cortes a partir da transcrição."""
@@ -192,6 +309,7 @@ class ProjectService:
                 updated = analyzer.evaluate_range(start, end, title=title, status=status, origin=clip.origin, edited=True)
                 self._attach_energy(analyzer, audio, clip_set, updated)
                 updated.id, updated.created_at = clip.id, clip.created_at
+                updated.render = clip.render  # continua disponível, mas passa a constar como desatualizado
             else:
                 updated = clip.model_copy(update={"title": title, "status": status, "edited": clip.edited or data.title is not None})
             updated.updated_at = utcnow()
@@ -202,7 +320,9 @@ class ProjectService:
     def delete_clip(self, project_id: str, clip_id: str) -> None:
         with self._clips_lock:
             _project, clip_set, _analyzer, _audio = self._clip_editing_context(project_id, need_analyzer=False)
-            del clip_set.clips[self._clip_index(clip_set, clip_id)]
+            clip = clip_set.clips.pop(self._clip_index(clip_set, clip_id))
+            if clip.render is not None:
+                (self.store.exports_dir(project_id) / clip.render.filename).unlink(missing_ok=True)
             self._save_clips(project_id, clip_set)
 
     def thumbnail_path(self, project_id: str) -> Path:
@@ -247,6 +367,8 @@ class ProjectService:
             folder = self.store.exports_dir(project.id)
             if not folder.is_dir():
                 continue
+            clip_set = self._load_clips(project)
+            titles = {c.render.filename: (c.id, c.title) for c in clip_set.clips if c.render} if clip_set else {}
             for file in folder.iterdir():
                 if not file.is_file() or file.suffix.lower() != ".mp4":
                     continue
@@ -259,6 +381,8 @@ class ProjectService:
                         size_bytes=stat.st_size,
                         created_at=_mtime(stat.st_mtime),
                         url=f"/api/projects/{project.id}/exports/{file.name}",
+                        clip_id=titles.get(file.name, (None, None))[0],
+                        clip_title=titles.get(file.name, (None, None))[1],
                     )
                 )
         exports.sort(key=lambda e: e.created_at, reverse=True)
@@ -412,6 +536,10 @@ class ProjectService:
         if project.status not in ("failed", "cancelled", "interrupted") and not needs_audio:
             raise ServiceError(409, "Este projeto não precisa ser reprocessado.")
         # Retoma só a etapa que falhou quando as anteriores já estão prontas.
+        if project.job is not None and project.job.kind == "render_clips" and project.clips is not None:
+            pending = self._pending_renders(project)
+            if pending:
+                return self._start_job(project_id, "render_clips", "rendering", self._render_task(project_id, pending))
         if project.job is not None and project.job.kind == "detect_clips" and project.transcript is not None:
             return self._start_job(project_id, "detect_clips", "detecting_clips", self._detect_task(project_id, True))
         if project.job is not None and project.job.kind == "transcribe" and self._has_audio(project):
@@ -609,7 +737,11 @@ class ProjectService:
             if keep_curated:
                 previous = self._load_clips(project)
                 if previous is not None:
-                    keep = [c for c in previous.clips if c.status != "suggested" or c.origin == "manual" or c.edited]
+                    keep = [
+                        c
+                        for c in previous.clips
+                        if c.status != "suggested" or c.origin == "manual" or c.edited or c.render is not None
+                    ]
             audio = self.store.project_dir(project_id) / project.audio.filename if self._has_audio(project) else None
             clip_set = detect_clips(
                 transcript,
@@ -644,6 +776,7 @@ class ProjectService:
             count=sum(1 for c in clip_set.clips if c.status != "rejected"),
             approved=sum(1 for c in clip_set.clips if c.status == "approved"),
             generated_at=clip_set.generated_at,
+            rendered=sum(1 for c in clip_set.clips if c.render is not None),
         )
         self.store.update(project_id, lambda p: setattr(p, "clips", summary))
 
@@ -693,6 +826,97 @@ class ProjectService:
         if end - start > MAX_CLIP_SECONDS:
             raise ServiceError(422, f"Um corte pode ter no máximo {int(MAX_CLIP_SECONDS)} segundos.")
         return start, end
+
+    @staticmethod
+    def _render_signature(project: Project, clip: Clip) -> str:
+        settings = project.settings
+        payload = {
+            "start": round(clip.start, 3),
+            "end": round(clip.end, 3),
+            "aspect": settings.aspect_ratio,
+            "style": settings.subtitle_style,
+            "size": settings.subtitle_font_size,
+            "position": settings.subtitle_position,
+            "highlight": settings.highlight_current_word,
+            "framing": settings.framing,
+            "transcript": project.transcript.created_at.isoformat() if project.transcript else None,
+        }
+        return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+    def _pending_renders(self, project: Project) -> list[str]:
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            return []
+        return [
+            c.id
+            for c in clip_set.clips
+            if c.status == "approved" and (c.render is None or c.render.signature != self._render_signature(project, c))
+        ]
+
+    def _render_context(self, project_id: str, clip_id: str):
+        project = self.get(project_id)
+        if project.transcript is None or project.media is None or not project.source.filename:
+            raise ServiceError(409, "O vídeo precisa estar processado e transcrito.")
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
+        clip = clip_set.clips[self._clip_index(clip_set, clip_id)]
+        tools = find_tools(self.settings_store.get().ffmpeg_dir)
+        source = self.store.project_dir(project_id) / project.source.filename
+        return project, clip, self.get_transcript(project_id), tools, source
+
+    @staticmethod
+    def _render_filename(clip: Clip, aspect: str) -> str:
+        decomposed = unicodedata.normalize("NFD", clip.title.lower())
+        ascii_title = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+        slug = _SLUG_INVALID.sub("-", ascii_title).strip("-")[:50].rstrip("-") or "corte"
+        return f"{slug}-{clip.id[:6]}-{aspect.replace(':', 'x')}.mp4"
+
+    def _render_task(self, project_id: str, clip_ids: list[str]):
+        def task(ctx: JobContext) -> None:
+            total = len(clip_ids)
+            for index, clip_id in enumerate(clip_ids):
+                ctx.check_cancelled()
+                try:
+                    project, clip, transcript, tools, source = self._render_context(project_id, clip_id)
+                except ServiceError as exc:
+                    if exc.status_code == 404:
+                        continue  # o corte foi excluído enquanto a fila andava
+                    raise MediaError(exc.message) from exc
+                settings: ClipSettings = project.settings
+                filename = self._render_filename(clip, settings.aspect_ratio)
+                exports = self.store.exports_dir(project_id)
+                start = index / total
+                ctx.progress(start, f"Corte {index + 1} de {total}: {clip.title[:40]}", force=True)
+                result = render_clip(
+                    ctx, tools, source, project.media, transcript, clip.start, clip.end, settings, exports / filename,
+                    progress_start=start, progress_end=(index + 1) / total,
+                )  # fmt: skip
+                info = RenderInfo(
+                    filename=filename,
+                    aspect_ratio=settings.aspect_ratio,
+                    width=result.width,
+                    height=result.height,
+                    duration_seconds=result.duration,
+                    size_bytes=result.size_bytes,
+                    framing=result.framing,  # type: ignore[arg-type]
+                    subtitle_style=settings.subtitle_style,
+                    subtitle_cues=result.cue_count,
+                    signature=self._render_signature(project, clip),
+                    notes=result.notes,
+                )
+                with self._clips_lock:
+                    current = self._load_clips(self.store.get(project_id))
+                    found = next((c for c in current.clips if c.id == clip_id), None) if current else None
+                    if found is None:
+                        (exports / filename).unlink(missing_ok=True)
+                        continue
+                    if found.render is not None and found.render.filename != filename:
+                        (exports / found.render.filename).unlink(missing_ok=True)
+                    found.render = info
+                    self._save_clips(project_id, current)
+
+        return task
 
     def _verify_source(self, ctx: JobContext, project_id: str, start: float, end: float) -> None:
         project = self.store.get(project_id)
