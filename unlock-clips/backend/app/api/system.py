@@ -11,6 +11,7 @@ from ..ffmpeg import FFmpegNotFound, find_tools, tool_version
 from ..transcription import engine_status
 from ..clips import criteria
 from ..framing import face_detection_status
+from ..logs import log_file
 from ..subtitles import TEMPLATES
 from ..schemas import (
     AppSettings,
@@ -33,12 +34,17 @@ Settings = Annotated[SettingsStore, Depends(get_settings_store)]
 
 
 @router.get("/health", response_model=HealthInfo)
-def health(request: Request, store: Settings) -> HealthInfo:
+def health(request: Request, store: Settings, service: Service) -> HealthInfo:
+    config = request.app.state.config
+    usage = service.disk_usage()
     info = HealthInfo(
         version=__version__,
         ffmpeg_available=False,
         ffprobe_available=False,
-        data_dir=str(request.app.state.config.data_dir),
+        data_dir=str(config.data_dir),
+        disk_free_bytes=usage[0] if usage else None,
+        disk_total_bytes=usage[1] if usage else None,
+        log_file=str(log_file(config.data_dir)),
     )
     info.transcription_available, info.transcription_error = engine_status()
     info.face_detection_available, info.face_detection_error = face_detection_status()

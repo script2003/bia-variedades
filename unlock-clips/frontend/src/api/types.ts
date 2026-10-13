@@ -403,6 +403,7 @@ export interface SystemStats {
   active_jobs: number;
   storage_bytes: number;
   exports_total: number;
+  disk_free_bytes: number | null;
 }
 
 export interface HealthInfo {
@@ -419,4 +420,7 @@ export interface HealthInfo {
   face_detection_available: boolean;
   face_detection_error: string | null;
   data_dir: string;
+  disk_free_bytes: number | null;
+  disk_total_bytes: number | null;
+  log_file: string | null;
 }

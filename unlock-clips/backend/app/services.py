@@ -98,6 +98,8 @@ MIN_CLIP_SECONDS = 1.0
 INTERRUPTED_MESSAGE = (
     "A aplicação foi encerrada antes de concluir esta tarefa. Clique em “Tentar novamente” para retomar."
 )
+# Espaço livre mínimo mantido no disco da pasta de dados (áudio extraído, vídeos gerados e arquivos temporários).
+MIN_FREE_BYTES = 500 * 1024 * 1024
 # Parcela do progresso da importação por link dedicada ao download (o restante é o processamento).
 DOWNLOAD_PROGRESS_SHARE = 0.6
 # Divisão do progresso do processamento: verificação, leitura da mídia + miniatura e extração de áudio.
@@ -204,6 +206,9 @@ class ProjectService:
             ids = [c.id for c in clip_set.clips if c.status == "approved"]
             if not ids:
                 raise ServiceError(409, "Aprove pelo menos um corte (ou escolha um corte) para gerar o vídeo.")
+        # Estimativa generosa: ~25 MB por minuto de vídeo vertical em 1080p.
+        minutes = sum(by_id[i].end - by_id[i].start for i in ids) / 60
+        self._require_free_space(int(minutes * 25 * 1024 * 1024), "gerar os vídeos")
         return self._start_job(project_id, "render_clips", "rendering", self._render_task(project_id, ids))
 
     def clip_frame(self, project_id: str, clip_id: str, at: float) -> bytes:
@@ -422,6 +427,27 @@ class ProjectService:
             raise ServiceError(404, "O arquivo de vídeo não foi encontrado no disco.")
         return path
 
+    def disk_usage(self) -> tuple[int, int] | None:
+        """(livre, total) em bytes no disco da pasta de dados."""
+        try:
+            usage = shutil.disk_usage(self.config.data_dir)
+        except OSError:
+            return None
+        return usage.free, usage.total
+
+    def _require_free_space(self, needed: int, action: str) -> None:
+        usage = self.disk_usage()
+        if usage is None or usage[0] >= needed + MIN_FREE_BYTES:
+            return
+        free_mb = usage[0] / 1024 / 1024
+        need_mb = (needed + MIN_FREE_BYTES) / 1024 / 1024
+        raise ServiceError(
+            507,
+            f"Espaço em disco insuficiente para {action}: há {free_mb:,.0f} MB livres e são necessários cerca de "
+            f"{need_mb:,.0f} MB. Libere espaço (por exemplo, excluindo vídeos exportados ou projetos antigos)."
+            .replace(",", "."),
+        )
+
     def stats(self) -> SystemStats:
         projects = self.store.list()
         by_status: dict[str, int] = {}
@@ -440,6 +466,7 @@ class ProjectService:
             active_jobs=self.jobs.active_count(),
             storage_bytes=storage,
             exports_total=len(self.list_exports()),
+            disk_free_bytes=usage[0] if (usage := self.disk_usage()) else None,
         )
 
     def list_exports(self, project_id: str | None = None) -> list[ExportedVideo]:
@@ -583,6 +610,7 @@ class ProjectService:
         max_bytes = app_settings.max_upload_bytes
         if declared_length is not None and declared_length > max_bytes:
             raise ServiceError(413, _too_large_message(app_settings))
+        self._require_free_space(declared_length or 0, "receber este vídeo")
 
         self.config.tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp = self.config.tmp_dir / f"{new_id()}.part"
@@ -650,6 +678,7 @@ class ProjectService:
             url = check_url(request.url, app_settings.allowed_link_domains)
         except LinkPolicyError as exc:
             raise ServiceError(400, str(exc)) from exc
+        self._require_free_space(0, "importar um vídeo")
         name = filename_from_response(url, None)
         project = Project(
             title=(request.title or "").strip()[:200] or _title_from_name(name),
@@ -1083,7 +1112,10 @@ class ProjectService:
                         (exports / filename).unlink(missing_ok=True)
                         continue
                     if found.render is not None and found.render.filename != filename:
-                        (exports / found.render.filename).unlink(missing_ok=True)
+                        try:
+                            (exports / found.render.filename).unlink(missing_ok=True)
+                        except OSError:
+                            logger.warning("Vídeo antigo %s não pôde ser excluído (aberto em outro programa?)", found.render.filename)
                     found.render = info
                     self._save_clips(project_id, current)
 

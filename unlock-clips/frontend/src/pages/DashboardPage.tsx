@@ -17,6 +17,8 @@ interface DashboardData {
   stats: SystemStats;
 }
 
+const LOW_DISK_BYTES = 2 * 1024 ** 3;
+
 export default function DashboardPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const { data, error, loading, refresh } = usePolling<DashboardData>(
@@ -48,6 +50,14 @@ export default function DashboardPage() {
       {error && (
         <div className="mb-6">
           <Notice tone="error">{error}</Notice>
+        </div>
+      )}
+      {data?.stats.disk_free_bytes != null && data.stats.disk_free_bytes < LOW_DISK_BYTES && (
+        <div className="mb-6">
+          <Notice tone="warning">
+            Pouco espaço livre no disco da pasta de dados ({formatBytes(data.stats.disk_free_bytes)}). Exclua vídeos
+            exportados ou projetos antigos antes de enviar vídeos grandes.
+          </Notice>
         </div>
       )}
       {actionError && (

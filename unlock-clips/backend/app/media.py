@@ -31,6 +31,8 @@ SIGNATURE_BYTES = 12
 
 _ISO_BMFF_BOXES = {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"}
 _UNSAFE_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
+# Nomes que o Windows não aceita como nome de arquivo, com qualquer extensão (CON.mp4, nul.txt…).
+_WINDOWS_RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", re.IGNORECASE)
 
 
 class InvalidVideo(JobError):
@@ -52,6 +54,8 @@ def sanitize_filename(raw: str, max_length: int = 180) -> str:
             name = stem[: max_length - len(ext) - 1] + "." + ext
         else:
             name = name[:max_length]
+    if _WINDOWS_RESERVED.match(name):
+        name = "_" + name
     return name or "video"
 
 

@@ -637,6 +637,7 @@ class SystemStats(BaseModel):
     active_jobs: int
     storage_bytes: int
     exports_total: int
+    disk_free_bytes: int | None = None
 
 
 class HealthInfo(BaseModel):
@@ -653,3 +654,6 @@ class HealthInfo(BaseModel):
     face_detection_available: bool = False
     face_detection_error: str | None = None
     data_dir: str
+    disk_free_bytes: int | None = None
+    disk_total_bytes: int | None = None
+    log_file: str | None = None

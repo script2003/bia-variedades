@@ -6,6 +6,7 @@ import ClipDetectionSettingsForm from "../components/ClipDetectionSettingsForm";
 import ClipSettingsForm from "../components/ClipSettingsForm";
 import TranscriptionSettingsForm from "../components/TranscriptionSettingsForm";
 import Notice from "../components/Notice";
+import { formatBytes } from "../lib/format";
 import PageHeader from "../components/PageHeader";
 
 export function parseDomains(text: string): string[] {
@@ -223,6 +224,21 @@ export default function SettingsPage() {
               <dt className="text-zinc-500">Pasta de dados</dt>
               <dd className="font-mono text-xs break-all">{health.data_dir}</dd>
             </div>
+            {health.disk_free_bytes !== null && (
+              <div>
+                <dt className="text-zinc-500">Espaço livre no disco</dt>
+                <dd>
+                  {formatBytes(health.disk_free_bytes)}
+                  {health.disk_total_bytes ? ` de ${formatBytes(health.disk_total_bytes)}` : ""}
+                </dd>
+              </div>
+            )}
+            {health.log_file && (
+              <div>
+                <dt className="text-zinc-500">Registro (log) para diagnóstico</dt>
+                <dd className="font-mono text-xs break-all">{health.log_file}</dd>
+              </div>
+            )}
           </dl>
         </section>
       )}

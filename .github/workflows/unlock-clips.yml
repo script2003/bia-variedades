@@ -1,0 +1,152 @@
+# Testes do UNLOCK CLIPS no Windows e no Linux, incluindo a instalação pelos scripts PowerShell
+# e um teste de ponta a ponta com o servidor rodando no Windows (transcrição com modelo Whisper real).
+name: UNLOCK CLIPS
+
+on:
+  push:
+    paths: ["unlock-clips/**", ".github/workflows/unlock-clips.yml"]
+  pull_request:
+    paths: ["unlock-clips/**", ".github/workflows/unlock-clips.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: unlock-clips-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Back-end (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.12" }
+    defaults:
+      run:
+        working-directory: unlock-clips/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: unlock-clips/backend/requirements*.txt
+      - name: Instalar FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: Instalar FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: ffmpeg -hide_banner -version
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Testes (pytest)
+        run: python -m pytest -o addopts="" -ra
+
+  frontend:
+    name: Interface (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: unlock-clips/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: unlock-clips/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+  windows-ponta-a-ponta:
+    name: Windows — instalação e fluxo completo
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        # Windows PowerShell 5.1, o mesmo usado pelos atalhos .bat.
+        shell: powershell
+        working-directory: unlock-clips
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Instalar FFmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Instalar o UNLOCK CLIPS (scripts\instalar.ps1)
+        run: .\scripts\instalar.ps1
+      - name: Gerar um vídeo com fala (voz sintetizada do Windows)
+        run: |
+          $wav = Join-Path $env:RUNNER_TEMP "fala.wav"
+          $video = Join-Path $env:RUNNER_TEMP "entrevista.mp4"
+          $texto = "Why do most people never manage to save money? The answer is simpler than it seems. " +
+            "Most people spend first and save what is left, and usually nothing is left at the end of the month. " +
+            "Let me tell you a story. One time I lost all my money in a risky investment. I was twenty five years old " +
+            "and I trusted a friend. It took me three years to recover, and that mistake changed everything for me. " +
+            "Honestly, I think ignoring this subject is a huge mistake. Schools should teach people about money. " +
+            "So what should you do today? First, pay yourself before anything else. Second, write down every expense " +
+            "for one month. Third, keep an emergency fund. If you do these three things, you will be ahead of most people."
+          try {
+            Add-Type -AssemblyName System.Speech
+            $voz = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            Write-Host ("Vozes: " + (($voz.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }) -join ", "))
+            $voz.SetOutputToWaveFile($wav)
+            $voz.Speak($texto)
+            $voz.Dispose()
+            ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc=size=1280x720:rate=25" -i $wav -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac $video
+            if ($LASTEXITCODE -ne 0) { throw "ffmpeg falhou" }
+            # UTF-8 sem BOM (o Out-File do PowerShell 5.1 acrescentaria um BOM e estragaria o nome da variável).
+            [IO.File]::AppendAllText($env:GITHUB_ENV, "E2E_ARGS=--video `"$video`" --idioma en --esperado money,people,save,mistake`n")
+          } catch {
+            Write-Warning "Síntese de voz indisponível ($_): o teste usará um vídeo sem fala."
+            [IO.File]::AppendAllText($env:GITHUB_ENV, "E2E_ARGS=`n")
+          }
+      - name: Iniciar o servidor (scripts\iniciar.ps1)
+        run: |
+          $saida = Join-Path $env:RUNNER_TEMP "servidor"
+          Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts\iniciar.ps1", "-SemNavegador" `
+            -RedirectStandardOutput "$saida.out" -RedirectStandardError "$saida.err"
+          $pronto = $false
+          for ($i = 0; $i -lt 90 -and -not $pronto; $i++) {
+            try { $saude = Invoke-RestMethod http://127.0.0.1:8000/api/health; $pronto = $true } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $pronto) { Get-Content "$saida.out", "$saida.err"; throw "O servidor não respondeu." }
+          $saude | ConvertTo-Json
+          $pagina = Invoke-WebRequest http://127.0.0.1:8000/projetos -UseBasicParsing
+          if ($pagina.Content -notmatch "UNLOCK CLIPS") { throw "A interface não foi servida." }
+      - name: Teste de ponta a ponta (scripts\teste_completo.py)
+        run: |
+          $argumentos = "scripts\teste_completo.py --modelo tiny --saida `"$env:RUNNER_TEMP\saida`" $env:E2E_ARGS"
+          $processo = Start-Process backend\.venv\Scripts\python.exe -ArgumentList $argumentos -NoNewWindow -Wait -PassThru
+          if ($processo.ExitCode -ne 0) { throw "O teste de ponta a ponta falhou." }
+      - name: Segunda inicialização reconhece o servidor em execução
+        run: |
+          .\scripts\iniciar.ps1 -SemNavegador
+          if ($LASTEXITCODE -ne 0) { throw "código $LASTEXITCODE" }
+      - name: Guardar vídeo gerado e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ponta-a-ponta
+          path: |
+            ${{ runner.temp }}/saida
+            ${{ runner.temp }}/servidor.*
+            unlock-clips/backend/data/logs
+          if-no-files-found: ignore

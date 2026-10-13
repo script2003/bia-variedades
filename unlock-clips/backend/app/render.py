@@ -9,7 +9,6 @@ TikTok, Reels e Shorts. O progresso é real e o cancelamento encerra o FFmpeg.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -213,7 +212,14 @@ def render_clip(
         try:
             run_ffmpeg(ctx, tools, args, duration=duration, progress_start=framing_end, progress_end=progress_end,
                        message="Gerando vídeo com legendas", cwd=work_dir)  # fmt: skip
-            os.replace(partial, output)
+            try:
+                os.replace(partial, output)
+            except PermissionError as exc:
+                # No Windows, um arquivo aberto em outro programa não pode ser substituído.
+                raise MediaError(
+                    f"Não foi possível salvar “{output.name}”: o arquivo está aberto em outro programa "
+                    "(por exemplo, um player de vídeo). Feche-o e tente novamente."
+                ) from exc
         finally:
             partial.unlink(missing_ok=True)
 
@@ -309,7 +315,3 @@ def render_frame(
         detail = result.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or [f"código {result.returncode}"]
         raise MediaError(f"Não foi possível gerar a prévia: {detail[0]}")
     return result.stdout
-
-
-def ffmpeg_available_for_render() -> bool:
-    return shutil.which("ffmpeg") is not None
