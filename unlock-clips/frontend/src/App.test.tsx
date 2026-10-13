@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { appSettings, makeProject, mockFetch } from "./test/fixtures";
+import { appSettings, makeProject, mockFetch, scoringCriteria } from "./test/fixtures";
 
 const stats = { projects_total: 1, projects_by_status: { ready: 1 }, active_jobs: 0, storage_bytes: 2048, exports_total: 0 };
 
@@ -15,6 +15,7 @@ function setup(path = "/") {
       "GET /api/projects": () => ({ body: [makeProject({ title: "Entrevista com a pesquisadora" })] }),
       "GET /api/stats": () => ({ body: stats }),
       "GET /api/exports": () => ({ body: [] }),
+      "GET /api/clip-scoring/criteria": () => ({ body: scoringCriteria }),
       "GET /api/transcription/models": () => ({
         body: [
           { name: "small", label: "Small", size_mb: 484, description: "Recomendado para CPU", installed: true, path: "x" },
@@ -74,6 +75,8 @@ describe("App", () => {
     expect(screen.getByLabelText("Pasta do FFmpeg (opcional)")).toHaveValue("");
     expect(screen.getByRole("radio", { name: /Small.*baixado/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: /Medium/ })).toHaveTextContent("1,5 GB");
+    expect(screen.getByLabelText("História completa")).toHaveValue("12");
+    expect(screen.getByText("Sugerir cortes automaticamente depois da transcrição")).toBeInTheDocument();
   });
 
   it("exibe página 404 para rotas desconhecidas", () => {

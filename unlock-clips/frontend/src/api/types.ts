@@ -33,12 +33,79 @@ export interface TranscriptionSettings {
   allow_download: boolean;
 }
 
+export interface ClipDetectionSettings {
+  auto_detect: boolean;
+  weights: Record<string, number>;
+}
+
 export interface AppSettings {
   clip_defaults: ClipSettings;
   allowed_link_domains: string[];
   max_upload_size_mb: number;
   ffmpeg_dir: string | null;
   transcription: TranscriptionSettings;
+  clip_detection: ClipDetectionSettings;
+}
+
+export interface ScoringCriterion {
+  key: string;
+  label: string;
+  description: string;
+  default_weight: number;
+}
+
+export type ClipStatus = "suggested" | "approved" | "rejected";
+
+export interface ScoreComponent {
+  key: string;
+  label: string;
+  weight: number;
+  value: number;
+  points: number;
+  details: string[];
+}
+
+export interface Clip {
+  id: string;
+  title: string;
+  start: number;
+  end: number;
+  score: number;
+  components: ScoreComponent[];
+  highlights: string[];
+  warnings: string[];
+  text: string;
+  status: ClipStatus;
+  origin: "auto" | "manual";
+  edited: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClipSet {
+  generated_at: string;
+  language: string;
+  duration_preset: DurationPreset;
+  max_clips: number;
+  weights: Record<string, number>;
+  candidates_evaluated: number;
+  audio_reference_db: number | null;
+  notes: string[];
+  clips: Clip[];
+}
+
+export interface ClipsSummary {
+  filename: string;
+  count: number;
+  approved: number;
+  generated_at: string;
+}
+
+export interface ClipUpdate {
+  title?: string;
+  start?: number;
+  end?: number;
+  status?: ClipStatus;
 }
 
 export interface WhisperModelOption {
@@ -50,7 +117,7 @@ export interface WhisperModelOption {
   path: string;
 }
 
-export type JobKind = "process" | "import_link" | "transcribe" | "validate";
+export type JobKind = "process" | "import_link" | "transcribe" | "detect_clips" | "validate";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export interface JobInfo {
@@ -70,6 +137,7 @@ export type ProjectStatus =
   | "validating"
   | "extracting_audio"
   | "transcribing"
+  | "detecting_clips"
   | "ready"
   | "failed"
   | "cancelled"
@@ -173,6 +241,7 @@ export interface Project {
   audio: AudioInfo | null;
   thumbnail: string | null;
   transcript: TranscriptSummary | null;
+  clips: ClipsSummary | null;
   job: JobInfo | null;
   warnings: string[];
   error: string | null;

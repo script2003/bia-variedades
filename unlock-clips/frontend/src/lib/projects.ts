@@ -13,6 +13,11 @@ export function canTranscribe(project: Project): boolean {
   return !hasActiveJob(project) && project.status === "ready" && project.audio !== null;
 }
 
+/** Já existe transcrição e nenhuma tarefa está rodando: pode gerar (ou refazer) as sugestões de cortes. */
+export function canDetectClips(project: Project): boolean {
+  return !hasActiveJob(project) && project.status === "ready" && project.transcript !== null;
+}
+
 /** Projetos criados antes da Etapa 2: prontos, mas sem o áudio extraído. */
 export function needsAudioExtraction(project: Project): boolean {
   return !hasActiveJob(project) && project.status === "ready" && project.audio === null;

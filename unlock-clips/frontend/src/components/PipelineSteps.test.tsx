@@ -9,12 +9,37 @@ const transcriptState = (project: Project) => buildSteps(project)[4]!.state;
 const base = makeProject();
 
 describe("buildSteps", () => {
-  it("marca as cinco etapas implementadas como concluídas e nunca as futuras", () => {
+  it("marca as seis etapas implementadas como concluídas e nunca as futuras", () => {
     const steps = buildSteps(base);
     expect(states(base)).toEqual(["done", "done", "done", "done"]);
     expect(transcriptState(base)).toBe("done");
     expect(steps[4]!.description).toBe("9 palavras · modelo small");
-    expect(steps.slice(5).every((s) => s.state === "unavailable")).toBe(true);
+    expect(steps[5]!.state).toBe("done");
+    expect(steps[5]!.description).toBe("2 corte(s) sugerido(s) · 1 aprovado(s)");
+    expect(steps.slice(6).every((s) => s.state === "unavailable")).toBe(true);
+  });
+
+  it("acompanha a detecção de cortes", () => {
+    const clipsState = (project: Project) => buildSteps(project)[5]!.state;
+    expect(clipsState(makeProject({ status: "detecting_clips", clips: null }))).toBe("active");
+    expect(clipsState(makeProject({ status: "ready", clips: null }))).toBe("pending");
+    const failed = makeProject({
+      status: "failed",
+      clips: null,
+      job: {
+        id: "j",
+        kind: "detect_clips",
+        status: "failed",
+        progress: 0.4,
+        message: "Falhou",
+        error: "x",
+        created_at: base.created_at,
+        started_at: base.created_at,
+        finished_at: base.created_at,
+      },
+    });
+    expect(clipsState(failed)).toBe("error");
+    expect(transcriptState(failed)).toBe("done");
   });
 
   it("acompanha a transcrição", () => {
@@ -75,6 +100,7 @@ describe("PipelineSteps", () => {
     render(<PipelineSteps project={base} />);
     expect(screen.getByLabelText("Extração de áudio: concluída")).toBeInTheDocument();
     expect(screen.getByLabelText("Transcrição com timestamps: concluída")).toBeInTheDocument();
-    expect(screen.getByLabelText("Identificação de cortes: disponível em breve")).toBeInTheDocument();
+    expect(screen.getByLabelText("Identificação de cortes: concluída")).toBeInTheDocument();
+    expect(screen.getByLabelText("Legendas e formato vertical: disponível em breve")).toBeInTheDocument();
   });
 });

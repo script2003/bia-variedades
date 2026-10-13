@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, Request
 from .. import __version__
 from ..ffmpeg import FFmpegNotFound, find_tools, tool_version
 from ..transcription import engine_status
-from ..schemas import AppSettings, ExportedVideo, HealthInfo, SystemStats, WhisperModelOption
+from ..clips import criteria
+from ..schemas import AppSettings, ExportedVideo, HealthInfo, ScoringCriterion, SystemStats, WhisperModelOption
 from ..services import ProjectService
 from ..storage import SettingsStore
 from .deps import get_service, get_settings_store
@@ -62,6 +63,12 @@ def save_settings(body: AppSettings, store: Settings) -> AppSettings:
 def transcription_models(service: Service) -> list[WhisperModelOption]:
     """Modelos disponíveis e quais já foram baixados para uso offline."""
     return service.engine.catalog()
+
+
+@router.get("/clip-scoring/criteria", response_model=list[ScoringCriterion])
+def scoring_criteria() -> list[ScoringCriterion]:
+    """Critérios da pontuação heurística dos cortes, com descrição e peso padrão."""
+    return criteria()
 
 
 @router.get("/exports", response_model=list[ExportedVideo])

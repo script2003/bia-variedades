@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBitrate, formatBytes, formatDuration, formatPercent, formatRelative } from "./format";
+import { formatBitrate, formatBytes, formatDuration, formatPercent, formatRelative, formatTimecode, parseTimecode } from "./format";
 
 describe("formatBytes", () => {
   it("formata em unidades binárias com vírgula decimal", () => {
@@ -49,5 +49,25 @@ describe("formatBitrate", () => {
     expect(formatBitrate(128_000)).toBe("128 kb/s");
     expect(formatBitrate(2_500_000)).toBe("2,5 Mb/s");
     expect(formatBitrate(null)).toBe("—");
+  });
+});
+
+describe("formatTimecode / parseTimecode", () => {
+  it("formata com décimos", () => {
+    expect(formatTimecode(83.45)).toBe("1:23.5");
+    expect(formatTimecode(5)).toBe("0:05.0");
+    expect(formatTimecode(3725)).toBe("1:02:05.0");
+  });
+
+  it("interpreta segundos, minutos e horas", () => {
+    expect(parseTimecode("83.5")).toBe(83.5);
+    expect(parseTimecode("83,5")).toBe(83.5);
+    expect(parseTimecode("1:23.5")).toBe(83.5);
+    expect(parseTimecode("1:02:05")).toBe(3725);
+    expect(parseTimecode(formatTimecode(1234.5))).toBe(1234.5);
+  });
+
+  it("recusa entradas inválidas", () => {
+    for (const bad of ["", "abc", "1:75", "1::2", "-3", "1:2:3:4"]) expect(parseTimecode(bad)).toBeNull();
   });
 });

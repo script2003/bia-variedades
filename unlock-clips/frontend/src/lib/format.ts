@@ -59,6 +59,28 @@ export function formatDuration(seconds: number | null | undefined): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
+/** Tempo com décimos para edição de cortes: 83.45 → "1:23.5"; 3725 → "1:02:05.0". */
+export function formatTimecode(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00.0";
+  const tenths = Math.round(seconds * 10);
+  const h = Math.floor(tenths / 36000);
+  const m = Math.floor((tenths % 36000) / 600);
+  const s = (tenths % 600) / 10;
+  const sec = s.toFixed(1).padStart(4, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+/** Aceita "83.5", "83,5", "1:23.5" ou "1:02:05". Retorna null se inválido. */
+export function parseTimecode(text: string): number | null {
+  const value = text.trim().replace(",", ".");
+  if (!value) return null;
+  const parts = value.split(":");
+  if (parts.length > 3 || parts.some((p) => p === "" || !/^\d+(\.\d+)?$/.test(p))) return null;
+  const numbers = parts.map(Number);
+  if (numbers.slice(1).some((n) => n >= 60)) return null;
+  return numbers.reduce((total, n) => total * 60 + n, 0);
+}
+
 export function formatBitrate(bitsPerSecond: number | null | undefined): string {
   if (!bitsPerSecond || bitsPerSecond <= 0) return "—";
   if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} Mb/s`;
@@ -70,6 +92,7 @@ export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   validating: "Verificando",
   extracting_audio: "Extraindo áudio",
   transcribing: "Transcrevendo",
+  detecting_clips: "Detectando cortes",
   ready: "Pronto",
   failed: "Erro",
   cancelled: "Cancelado",
@@ -88,6 +111,7 @@ export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
 export const JOB_KIND_LABEL: Record<JobKind, string> = {
   process: "Preparação do vídeo",
   transcribe: "Transcrição",
+  detect_clips: "Detecção de cortes",
   validate: "Verificação do arquivo",
   import_link: "Importação por link",
 };

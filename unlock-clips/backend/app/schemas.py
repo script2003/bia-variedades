@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DurationPreset = Literal["15-30", "30-60", "60-90"]
 AspectRatio = Literal["9:16", "1:1", "16:9"]
@@ -18,7 +18,7 @@ SubtitlePosition = Literal["inferior", "centro", "superior"]
 FramingMode = Literal["centro", "rosto"]
 
 # "validate" é mantido para ler projetos criados na Etapa 1.
-JobKind = Literal["process", "import_link", "transcribe", "validate"]
+JobKind = Literal["process", "import_link", "transcribe", "detect_clips", "validate"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled", "interrupted"]
 ACTIVE_JOB_STATUSES: frozenset[str] = frozenset({"queued", "running"})
 
@@ -27,6 +27,7 @@ ProjectStatus = Literal[
     "validating",  # verificando o arquivo recebido
     "extracting_audio",  # lendo a mídia com FFprobe e extraindo o áudio com FFmpeg
     "transcribing",  # transcrevendo o áudio com faster-whisper
+    "detecting_clips",  # procurando os melhores trechos na transcrição
     "ready",  # etapas concluídas até o momento (áudio extraído e, se ativado, transcrito)
     "failed",
     "cancelled",
@@ -116,6 +117,41 @@ class TranscriptionSettings(BaseModel):
         return value or None
 
 
+# Critérios da pontuação heurística dos cortes (chave -> peso padrão).
+SCORING_CRITERIA_DEFAULTS: dict[str, float] = {
+    "hook": 20,
+    "impact": 15,
+    "opinion": 12,
+    "qa": 15,
+    "story": 12,
+    "clarity": 10,
+    "context": 16,
+    "emphasis": 5,
+    "duration": 5,
+}
+
+
+class ClipDetectionSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    auto_detect: bool = True
+    weights: dict[str, float] = Field(default_factory=lambda: dict(SCORING_CRITERIA_DEFAULTS))
+
+    @field_validator("weights")
+    @classmethod
+    def _check_weights(cls, values: dict[str, float]) -> dict[str, float]:
+        unknown = set(values) - set(SCORING_CRITERIA_DEFAULTS)
+        if unknown:
+            raise ValueError(f"Critérios desconhecidos: {', '.join(sorted(unknown))}")
+        merged = {**SCORING_CRITERIA_DEFAULTS, **values}
+        for key, weight in merged.items():
+            if not 0 <= weight <= 100:
+                raise ValueError(f"O peso de '{key}' deve ficar entre 0 e 100.")
+        if sum(merged.values()) <= 0:
+            raise ValueError("Pelo menos um critério precisa ter peso maior que zero.")
+        return merged
+
+
 class AppSettings(BaseModel):
     """Preferências globais persistidas em ``settings.json``."""
 
@@ -127,6 +163,7 @@ class AppSettings(BaseModel):
     # Pasta com ffmpeg(.exe) e ffprobe(.exe). Vazio = procurar no PATH do sistema.
     ffmpeg_dir: str | None = Field(default=None, max_length=1024)
     transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
+    clip_detection: ClipDetectionSettings = Field(default_factory=ClipDetectionSettings)
 
     @field_validator("ffmpeg_dir")
     @classmethod
@@ -281,6 +318,93 @@ class TranscriptSummary(BaseModel):
     created_at: datetime
 
 
+ClipStatus = Literal["suggested", "approved", "rejected"]
+
+
+class ScoreComponent(BaseModel):
+    """Contribuição de um critério para a pontuação (explicável)."""
+
+    key: str
+    label: str
+    weight: float
+    value: float  # 0..1
+    points: float  # contribuição na escala 0..100
+    details: list[str] = Field(default_factory=list)
+
+
+class Clip(BaseModel):
+    id: str = Field(default_factory=lambda: new_id()[:12])
+    title: str
+    start: float
+    end: float
+    score: float  # 0..100, heurística — não é previsão de visualizações
+    components: list[ScoreComponent] = Field(default_factory=list)
+    highlights: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    text: str = ""
+    status: ClipStatus = "suggested"
+    origin: Literal["auto", "manual"] = "auto"
+    edited: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+
+class ClipSet(BaseModel):
+    """Cortes de um projeto, salvos em ``clips.json``."""
+
+    generated_at: datetime = Field(default_factory=utcnow)
+    language: str
+    duration_preset: str
+    max_clips: int
+    weights: dict[str, float]
+    candidates_evaluated: int = 0
+    audio_reference_db: float | None = None
+    notes: list[str] = Field(default_factory=list)
+    clips: list[Clip] = Field(default_factory=list)
+
+
+class ClipsSummary(BaseModel):
+    filename: str
+    count: int
+    approved: int
+    generated_at: datetime
+
+
+class ClipCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    title: str | None = Field(default=None, max_length=200)
+
+
+class ClipUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    start: float | None = Field(default=None, ge=0)
+    end: float | None = Field(default=None, gt=0)
+    status: ClipStatus | None = None
+
+
+class DetectClipsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Mantém cortes aprovados e criados manualmente ao gerar novas sugestões.
+    keep_curated: bool = True
+
+
+class ScoringCriterion(BaseModel):
+    key: str
+    label: str
+    description: str
+    default_weight: float
+
+
 class Project(BaseModel):
     schema_version: int = SCHEMA_VERSION
     id: str = Field(default_factory=new_id)
@@ -294,6 +418,7 @@ class Project(BaseModel):
     audio: AudioInfo | None = None
     thumbnail: str | None = None
     transcript: TranscriptSummary | None = None
+    clips: ClipsSummary | None = None
     job: JobInfo | None = None
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None

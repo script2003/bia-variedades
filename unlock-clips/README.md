@@ -9,7 +9,7 @@ pagos.
 - **Armazenamento:** arquivos locais (JSON + vídeos) em `backend/data/`
 - **Vídeo:** FFmpeg e FFprobe (leitura da mídia, extração de áudio, miniaturas)
 - **Transcrição:** faster-whisper com modelos locais (CPU ou GPU NVIDIA), sem serviços pagos
-- **IA (próximas etapas):** heurísticas explicáveis para identificar bons cortes
+- **Detecção de cortes:** regras explicáveis sobre a transcrição e o volume da voz, 100% local
 
 ## Situação do desenvolvimento
 
@@ -18,7 +18,7 @@ pagos.
 | 1 | Estrutura, interface e envio de vídeos | ✅ Concluída |
 | 2 | Integração com FFmpeg e extração de áudio | ✅ Concluída |
 | 3 | Transcrição com timestamps (faster-whisper) | ✅ Concluída |
-| 4 | Identificação e seleção de cortes | Pendente |
+| 4 | Identificação e seleção de cortes | ✅ Concluída |
 | 5 | Legendas e conversão para formatos verticais | Pendente |
 | 6 | Editor, exportação MP4 e gerenciamento | Pendente |
 | 7 | Testes, documentação e preparação para Windows | Pendente |
@@ -87,8 +87,48 @@ pagos.
 Tempo de processamento (estimativa para CPU moderna, modelo *small*, int8): aproximadamente de 0,3× a 1× a
 duração do áudio. Modelos maiores são mais precisos e mais lentos; com GPU NVIDIA ficam muitas vezes mais rápidos.
 
-As configurações de corte já são salvas em cada projeto e serão usadas pelas Etapas 4 e 5. As etapas que
-ainda não existem aparecem como **"em breve"** na tela do projeto — nada é simulado como concluído.
+### O que a Etapa 4 acrescentou
+
+- **Sugestão automática de cortes** depois da transcrição (pode ser desligada) ou pelo botão
+  **Sugerir cortes** / **Gerar novamente**, respeitando a **duração** (15–30, 30–60 ou 60–90 s) e a
+  **quantidade máxima** definidas no projeto.
+- Como funciona:
+  1. as palavras com tempo viram **frases** (pontuação, pausas e limites de segmento do Whisper);
+  2. **mudanças de assunto** são detectadas pela queda de semelhança de vocabulário entre trechos e por
+     expressões como "mudando de assunto";
+  3. todo trecho que começa e termina em frase e cabe na duração escolhida é avaliado (um vídeo de 80 min
+     é analisado em cerca de 1 s);
+  4. os melhores são escolhidos sem sobreposição relevante e sem repetir a frase de abertura; trechos com
+     pontuação muito baixa em relação ao melhor do vídeo não são sugeridos (uma nota informa quantos).
+- **Pontuação heurística explicável (0–100)**, somando critérios com pesos ajustáveis em Configurações:
+
+  | Critério | O que observa |
+  |----------|---------------|
+  | Gancho inicial | pergunta, frase forte, número, história ou fala direta ao público nos primeiros segundos |
+  | Frases de impacto | expressões fortes e superlativos ("o maior erro", "ninguém fala", "nunca"…) |
+  | Opinião e debate | "na minha opinião", "eu discordo", contrastes ("mas", "por outro lado") |
+  | Pergunta e resposta | começa com pergunta e traz a resposta dentro do corte |
+  | História completa | marcas de início ("uma vez"), desenvolvimento ("então", "decidi") e conclusão ("no final", "aprendi") |
+  | Clareza da fala | confiança da transcrição, ritmo, vícios de linguagem ("né", "tipo") e pausas longas |
+  | Contexto completo | frases inteiras, sem começar com "mas"/"e"/"isso", sem terminar em pergunta sem resposta e sem atravessar mudança de assunto |
+  | Ênfase na voz | volume da fala acima da média do próprio vídeo |
+  | Duração | proximidade do meio da faixa escolhida |
+
+  Cada corte mostra os **motivos** (✓), os **avisos** (⚠) e, em "Por que esta pontuação?", a contribuição
+  de cada critério. **A pontuação compara trechos do mesmo vídeo; ela não prevê visualizações.**
+- **Ajuste manual**: pré-visualizar (o vídeo toca só o trecho e pausa no fim), aprovar, descartar, restaurar,
+  editar título, ajustar início e fim (±0,5 s ou "usar tempo atual do vídeo"; os limites são ajustados para
+  não cortar palavras e a pontuação é recalculada), adicionar corte manual e excluir.
+- **Gerar novamente** mantém cortes aprovados, descartados, ajustados e manuais; descartados não voltam a ser
+  sugeridos.
+- Expressões em **português**, **inglês** e **espanhol** (outros idiomas usam a lista em português e recebem
+  um aviso).
+
+> Refinamento por IA generativa (LLM) não foi incluído para manter tudo gratuito e local. A arquitetura
+> permite acrescentá-lo como etapa opcional (ver "Próximos passos").
+
+As configurações de corte são salvas em cada projeto e serão usadas também pela Etapa 5 (legendas e formato).
+As etapas que ainda não existem aparecem como **"em breve"** na tela do projeto — nada é simulado como concluído.
 
 ## Estrutura de pastas
 
@@ -109,6 +149,8 @@ unlock-clips/
 │   │   ├── media.py              validação de arquivos de vídeo e SHA-256
 │   │   ├── ffmpeg.py             FFprobe, FFmpeg com progresso/cancelamento, áudio e miniatura
 │   │   ├── transcription.py      faster-whisper: blocos, progresso, modelos, SRT/VTT/TXT
+│   │   ├── clips.py              detecção e pontuação explicável dos cortes
+│   │   ├── clip_lexicon.py       expressões usadas pelos critérios (pt, en, es)
 │   │   ├── links.py              política de links autorizados e download
 │   │   ├── services.py           regras de negócio dos projetos
 │   │   └── api/                  rotas HTTP (projetos e sistema)
@@ -255,14 +297,15 @@ erro ao carregar o modelo, volte para **CPU**.
 3. Acompanhe o envio; em seguida, a página do projeto mostra o processamento em segundo plano
    (verificação → leitura da mídia → extração de áudio → transcrição) com a porcentagem real. Use
    **Cancelar** para interromper a tarefa. Na primeira transcrição o modelo é baixado (484 MB no padrão).
-4. Quando o status ficar **Pronto**, leia e pesquise a transcrição, clique nos trechos para conferir no vídeo
-   e baixe SRT/VTT/TXT. As configurações dos cortes podem ser ajustadas e salvas.
+4. Quando o status ficar **Pronto**, revise os **Cortes sugeridos**: pré-visualize, veja por que cada trecho
+   foi escolhido, ajuste início e fim, aprove ou descarte. A transcrição pode ser lida, pesquisada e baixada
+   (SRT/VTT/TXT). Se mudar a duração ou a quantidade de cortes do projeto, clique em **Gerar novamente**.
 
 Para importar por link: em **Configurações → Links autorizados**, cadastre os domínios das fontes que você
 tem direito de usar (por exemplo, o armazenamento do seu site). Depois, na aba **Usar link**, informe o
 link **direto** do arquivo de vídeo e confirme a autorização.
 
-> A geração dos cortes propriamente dita (seleção, legendas e exportação) será adicionada nas Etapas 4 a 6.
+> As legendas, o formato vertical e a exportação em MP4 serão adicionados nas Etapas 5 e 6.
 
 ## Variáveis de ambiente (opcionais)
 
@@ -292,12 +335,26 @@ Exemplo no PowerShell: `$env:UNLOCK_DATA_DIR = "D:\UnlockClips\dados"` antes de 
 | GET | `/api/projects/{id}/transcript` | transcrição completa (trechos e palavras com tempos) |
 | GET | `/api/projects/{id}/transcript.srt` · `.vtt` · `.txt` | download da transcrição |
 | GET | `/api/transcription/models` | modelos disponíveis e quais já foram baixados |
+| POST | `/api/projects/{id}/clips/detect` | gerar ou refazer sugestões (`{"keep_curated": true}` mantém os curados) |
+| GET | `/api/projects/{id}/clips` | cortes com pontuação, critérios, motivos e avisos |
+| POST | `/api/projects/{id}/clips` | criar corte manual (`start`, `end`, `title`) |
+| PATCH/DELETE | `/api/projects/{id}/clips/{clip_id}` | editar título, status, início/fim (recalcula) ou excluir |
+| GET | `/api/clip-scoring/criteria` | critérios da pontuação, descrições e pesos padrão |
 | GET | `/api/projects/{id}/source` | vídeo original (com suporte a `Range`) |
 | GET | `/api/projects/{id}/audio` | áudio extraído (WAV mono 16 kHz, com suporte a `Range`) |
 | GET | `/api/projects/{id}/thumbnail` | miniatura JPEG |
 | GET | `/api/exports` | vídeos exportados |
 
 Documentação interativa: http://127.0.0.1:8000/docs
+
+## Próximos passos
+
+- **Etapa 5** — legendas sincronizadas (com destaque da palavra atual) e conversão para 9:16, 1:1 e 16:9.
+- **Etapa 6** — editor dos cortes, exportação em MP4 e gerenciamento dos vídeos exportados.
+- **Etapa 7** — testes finais, documentação e preparação para execução no Windows.
+- **Opcional** — refinamento das sugestões por IA generativa (por exemplo, para reescrever títulos ou
+  reordenar candidatos). Não está incluído: exigiria um modelo local adicional ou uma API paga, que seria
+  claramente identificada como tal e sempre opcional.
 
 ## Uso responsável
 

@@ -327,7 +327,9 @@ def test_upload_is_transcribed_automatically(whisper_client, real_video):
         time.sleep(0.02)
     assert project["status"] == "ready", project
     assert "transcribing" in seen
-    assert project["job"]["kind"] == "transcribe"
+    # Com a detecção automática ligada (padrão), a última etapa é a sugestão de cortes.
+    assert project["job"]["kind"] == "detect_clips"
+    assert project["clips"] is not None
     summary = project["transcript"]
     assert summary["language"] == "pt" and summary["model"] == "tiny-random" and summary["segment_count"] > 0
 

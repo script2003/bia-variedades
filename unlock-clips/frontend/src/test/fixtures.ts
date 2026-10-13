@@ -1,4 +1,4 @@
-import type { AppSettings, ClipSettings, Project, Transcript } from "../api/types";
+import type { AppSettings, Clip, ClipSet, ClipSettings, Project, ScoringCriterion, Transcript } from "../api/types";
 
 export const clipDefaults: ClipSettings = {
   duration: "30-60",
@@ -27,7 +27,16 @@ export const appSettings: AppSettings = {
     auto_transcribe: true,
     allow_download: true,
   },
+  clip_detection: {
+    auto_detect: true,
+    weights: { hook: 20, impact: 15, opinion: 12, qa: 15, story: 12, clarity: 10, context: 16, emphasis: 5, duration: 5 },
+  },
 };
+
+export const scoringCriteria: ScoringCriterion[] = [
+  { key: "hook", label: "Gancho inicial", description: "Os primeiros segundos prendem a atenção.", default_weight: 20 },
+  { key: "story", label: "História completa", description: "Início, desenvolvimento e conclusão.", default_weight: 12 },
+];
 
 export function makeProject(overrides: Partial<Project> = {}): Project {
   return {
@@ -75,6 +84,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
       duration_seconds: 3725,
       created_at: "2026-10-10T12:30:00Z",
     },
+    clips: { filename: "clips.json", count: 2, approved: 1, generated_at: "2026-10-10T12:31:00Z" },
     job: null,
     warnings: [],
     error: null,
@@ -93,6 +103,55 @@ export const sampleTranscript: Transcript = {
     { id: 0, start: 0, end: 4.2, text: "Bem-vindos ao podcast.", words: [], avg_logprob: -0.2, no_speech_prob: 0.01 },
     { id: 1, start: 4.2, end: 9.8, text: "Hoje vamos falar de educação.", words: [], avg_logprob: -0.3, no_speech_prob: 0.01 },
     { id: 2, start: 65, end: 70, text: "A pergunta é: por que isso importa?", words: [], avg_logprob: -0.25, no_speech_prob: 0.02 },
+  ],
+};
+
+export function makeClip(overrides: Partial<Clip> = {}): Clip {
+  return {
+    id: "clip-1",
+    title: "Por que a maioria nunca guarda dinheiro?",
+    start: 21.9,
+    end: 42.0,
+    score: 74.5,
+    components: [
+      { key: "hook", label: "Gancho inicial", weight: 20, value: 0.9, points: 17.1, details: ["Abre com uma pergunta"] },
+      { key: "qa", label: "Pergunta e resposta", weight: 15, value: 1, points: 14.3, details: ["Pergunta respondida em 17 s"] },
+      { key: "story", label: "História completa", weight: 12, value: 0, points: 0, details: [] },
+    ],
+    highlights: ["Abre com uma pergunta", "Pergunta respondida em 17 s"],
+    warnings: [],
+    text: "Por que a maioria das pessoas nunca consegue guardar dinheiro? A resposta é simples.",
+    status: "suggested",
+    origin: "auto",
+    edited: false,
+    created_at: "2026-10-10T12:31:00Z",
+    updated_at: "2026-10-10T12:31:00Z",
+    ...overrides,
+  };
+}
+
+export const sampleClipSet: ClipSet = {
+  generated_at: "2026-10-10T12:31:00Z",
+  language: "pt",
+  duration_preset: "15-30",
+  max_clips: 10,
+  weights: appSettings.clip_detection.weights,
+  candidates_evaluated: 120,
+  audio_reference_db: -24.5,
+  notes: [],
+  clips: [
+    makeClip(),
+    makeClip({
+      id: "clip-2",
+      title: "Uma vez eu perdi todo o meu dinheiro",
+      start: 64.4,
+      end: 81.7,
+      score: 44.7,
+      status: "approved",
+      warnings: ["Começa com “e”, pode depender do que foi dito antes"],
+      text: "Uma vez eu perdi todo o meu dinheiro.",
+    }),
+    makeClip({ id: "clip-3", title: "Trecho descartado", start: 100, end: 118, score: 20, status: "rejected", text: "e aí tipo" }),
   ],
 };
 

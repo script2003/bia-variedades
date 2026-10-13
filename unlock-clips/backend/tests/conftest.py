@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.main import create_app
-from app.schemas import AppSettings, TranscriptionSettings
+from app.schemas import AppSettings, ClipDetectionSettings, TranscriptionSettings
 from app.storage import SettingsStore
 
 # Cabeçalho mínimo de um MP4 (caixa "ftyp") seguido de dados de preenchimento.
@@ -48,6 +48,12 @@ def media_dir(tmp_path_factory) -> Path:
     _generate(folder / "sample.mkv", *video, *audio, "-c:v", "mpeg4", "-c:a", "aac", "-shortest")
     _generate(folder / "silent.mp4", *video, "-c:v", "mpeg4")
     _generate(folder / "audio_only.mp4", *audio, "-c:a", "aac")
+    _generate(
+        folder / "long.mp4",
+        "-f", "lavfi", "-i", "color=c=gray:s=64x64:r=2:d=150",
+        "-f", "lavfi", "-i", "sine=frequency=300:sample_rate=16000:duration=150",
+        "-c:v", "mpeg4", "-c:a", "aac", "-shortest",
+    )  # fmt: skip
     return folder
 
 
@@ -71,11 +77,16 @@ def tiny_model_dir(tmp_path_factory) -> Path:
 FAST_WHISPER_OPTIONS = {"temperature": 0.0}
 
 
-def write_settings(config: AppConfig, **transcription: object) -> None:
+def write_settings(config: AppConfig, auto_detect: bool = True, **transcription: object) -> None:
     """Grava settings.json antes de iniciar a aplicação. Por padrão, sem transcrição automática."""
     config.ensure_dirs()
     options = {"auto_transcribe": False, **transcription}
-    SettingsStore(config.settings_file).save(AppSettings(transcription=TranscriptionSettings(**options)))
+    SettingsStore(config.settings_file).save(
+        AppSettings(
+            transcription=TranscriptionSettings(**options),
+            clip_detection=ClipDetectionSettings(auto_detect=auto_detect),
+        )
+    )
 
 
 @pytest.fixture

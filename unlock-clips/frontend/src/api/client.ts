@@ -1,5 +1,9 @@
 import type {
   AppSettings,
+  Clip,
+  ClipSet,
+  ClipUpdate,
+  ScoringCriterion,
   ExportedVideo,
   HealthInfo,
   LinkImportRequest,
@@ -78,6 +82,22 @@ export const api = {
   transcriptDownloadUrl: (id: string, format: "srt" | "vtt" | "txt") =>
     `/api/projects/${encodeURIComponent(id)}/transcript.${format}`,
   transcriptionModels: () => request<WhisperModelOption[]>("/api/transcription/models"),
+  scoringCriteria: () => request<ScoringCriterion[]>("/api/clip-scoring/criteria"),
+  getClips: (id: string) => request<ClipSet>(`/api/projects/${encodeURIComponent(id)}/clips`),
+  detectClips: (id: string, keepCurated = true) =>
+    request<Project>(`/api/projects/${encodeURIComponent(id)}/clips/detect`, {
+      method: "POST",
+      body: JSON.stringify({ keep_curated: keepCurated }),
+    }),
+  createClip: (id: string, data: { start: number; end: number; title?: string }) =>
+    request<Clip>(`/api/projects/${encodeURIComponent(id)}/clips`, { method: "POST", body: JSON.stringify(data) }),
+  updateClip: (id: string, clipId: string, data: ClipUpdate) =>
+    request<Clip>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteClip: (id: string, clipId: string) =>
+    request<void>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}`, { method: "DELETE" }),
   importFromLink: (payload: LinkImportRequest) =>
     request<Project>("/api/projects/from-link", { method: "POST", body: JSON.stringify(payload) }),
   listExports: () => request<ExportedVideo[]>("/api/exports"),

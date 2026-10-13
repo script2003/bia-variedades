@@ -8,7 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import ValidationError
 
-from ..schemas import ClipSettings, LinkImportRequest, Project, ProjectUpdate, Transcript
+from ..schemas import (
+    Clip,
+    ClipCreate,
+    ClipSet,
+    ClipSettings,
+    ClipUpdate,
+    DetectClipsRequest,
+    LinkImportRequest,
+    Project,
+    ProjectUpdate,
+    Transcript,
+)
 from ..transcription import to_srt, to_text, to_vtt
 from ..services import ProjectService
 from .deps import get_service
@@ -128,6 +139,35 @@ def download_transcript(project_id: str, fmt: str, service: Service) -> PlainTex
         media_type=f"{media_type}; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{project_id}/clips/detect", response_model=Project)
+def detect_clips(project_id: str, service: Service, body: DetectClipsRequest | None = None) -> Project:
+    """Gera (ou refaz) as sugestões de cortes. Por padrão mantém os cortes aprovados, descartados e manuais."""
+    return service.detect(project_id, keep_curated=(body or DetectClipsRequest()).keep_curated)
+
+
+@router.get("/{project_id}/clips", response_model=ClipSet)
+def list_clips(project_id: str, service: Service) -> ClipSet:
+    return service.get_clips(project_id)
+
+
+@router.post("/{project_id}/clips", response_model=Clip, status_code=201)
+def create_clip(project_id: str, body: ClipCreate, service: Service) -> Clip:
+    """Cria um corte manual; a pontuação é calculada para o intervalo informado."""
+    return service.create_clip(project_id, body)
+
+
+@router.patch("/{project_id}/clips/{clip_id}", response_model=Clip)
+def update_clip(project_id: str, clip_id: str, body: ClipUpdate, service: Service) -> Clip:
+    """Edita título, status ou limites (a pontuação é recalculada quando os tempos mudam)."""
+    return service.update_clip(project_id, clip_id, body)
+
+
+@router.delete("/{project_id}/clips/{clip_id}", status_code=204)
+def delete_clip(project_id: str, clip_id: str, service: Service) -> Response:
+    service.delete_clip(project_id, clip_id)
+    return Response(status_code=204)
 
 
 @router.get("/{project_id}/thumbnail")

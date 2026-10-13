@@ -15,7 +15,7 @@ interface Step {
  * como "disponível em breve" — nunca como concluídas.
  */
 export function buildSteps(project: Project): Step[] {
-  const { status, source, media, audio, transcript, job } = project;
+  const { status, source, media, audio, transcript, clips, job } = project;
   const importing = status === "importing";
   const problem = ["failed", "cancelled", "interrupted"].includes(status);
   const hasFile = source.filename !== null && !importing;
@@ -40,6 +40,13 @@ export function buildSteps(project: Project): Step[] {
       : problem && audio && job?.kind === "transcribe"
         ? "error"
         : "pending";
+  const clipsState: StepState = clips
+    ? "done"
+    : status === "detecting_clips"
+      ? "active"
+      : problem && transcript && job?.kind === "detect_clips"
+        ? "error"
+        : "pending";
   const later = (title: string, description: string): Step => ({ title, description, state: "unavailable" });
 
   return [
@@ -58,7 +65,13 @@ export function buildSteps(project: Project): Step[] {
         : "faster-whisper local, com tempo de cada palavra.",
       state: transcriptState,
     },
-    later("Identificação de cortes", "Pontuação heurística explicável — Etapa 4."),
+    {
+      title: "Identificação de cortes",
+      description: clips
+        ? `${clips.count} corte(s) sugerido(s) · ${clips.approved} aprovado(s)`
+        : "Pontuação heurística explicável a partir da transcrição.",
+      state: clipsState,
+    },
     later("Legendas e formato vertical", "Legendas sincronizadas e 9:16 — Etapa 5."),
     later("Edição e exportação MP4", "Editor de cortes — Etapa 6."),
   ];

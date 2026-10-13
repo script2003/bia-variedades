@@ -1,7 +1,8 @@
 import { CheckCircle2, Save, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import type { AppSettings, HealthInfo, WhisperModelOption } from "../api/types";
+import type { AppSettings, HealthInfo, ScoringCriterion, WhisperModelOption } from "../api/types";
+import ClipDetectionSettingsForm from "../components/ClipDetectionSettingsForm";
 import ClipSettingsForm from "../components/ClipSettingsForm";
 import TranscriptionSettingsForm from "../components/TranscriptionSettingsForm";
 import Notice from "../components/Notice";
@@ -49,13 +50,15 @@ export default function SettingsPage() {
   const [domainsText, setDomainsText] = useState("");
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [models, setModels] = useState<WhisperModelOption[]>([]);
+  const [criteria, setCriteria] = useState<ScoringCriterion[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.getSettings(), api.health(), api.transcriptionModels()])
-      .then(([loaded, info, catalog]) => {
+    Promise.all([api.getSettings(), api.health(), api.transcriptionModels(), api.scoringCriteria()])
+      .then(([loaded, info, catalog, scoring]) => {
+        if (active) setCriteria(scoring);
         if (!active) return;
         setSettings(loaded);
         setDomainsText(loaded.allowed_link_domains.join("\n"));
@@ -141,6 +144,21 @@ export default function SettingsPage() {
                 }}
               />
             </div>
+          </section>
+
+          <section className="card grid gap-4 p-5 sm:p-6" aria-label="Detecção de cortes">
+            <div>
+              <h2 className="mb-1 text-lg font-semibold">Detecção de cortes</h2>
+              <p className="text-sm text-zinc-500">
+                Os cortes são pontuados por critérios explicáveis. Ajuste os pesos para priorizar o tipo de momento que mais
+                combina com o seu conteúdo.
+              </p>
+            </div>
+            <ClipDetectionSettingsForm
+              value={settings.clip_detection}
+              criteria={criteria}
+              onChange={(clip_detection) => setSettings({ ...settings, clip_detection })}
+            />
           </section>
 
           <section className="card grid gap-4 p-5 sm:p-6" aria-label="Transcrição">

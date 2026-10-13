@@ -9,6 +9,7 @@ import JobProgress from "../components/JobProgress";
 import MediaDetails from "../components/MediaDetails";
 import Notice from "../components/Notice";
 import PipelineSteps from "../components/PipelineSteps";
+import ClipsPanel from "../components/ClipsPanel";
 import StatusBadge from "../components/StatusBadge";
 import TranscriptPanel from "../components/TranscriptPanel";
 import { usePolling } from "../hooks/usePolling";
@@ -100,6 +101,8 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   const [videoError, setVideoError] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Fim da pré-visualização de um corte: o vídeo pausa sozinho ao chegar nele.
+  const previewEnd = useRef<number | null>(null);
 
   const { data: project, error, loading, setData, refresh } = usePolling(
     () => api.getProject(projectId),
@@ -134,9 +137,18 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   const seek = (seconds: number) => {
     const video = videoRef.current;
     if (!video) return;
+    previewEnd.current = null;
     video.currentTime = seconds;
     setCurrentTime(seconds);
     video.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  };
+
+  const preview = (start: number, end: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    seek(start);
+    previewEnd.current = end;
+    void video.play()?.catch(() => undefined);
   };
   const settingsDirty = settings !== null && JSON.stringify(settings) !== JSON.stringify(project.settings);
 
@@ -225,9 +237,15 @@ function ProjectDetail({ projectId }: { projectId: string }) {
             {warning}
           </Notice>
         ))}
-        {project.status === "ready" && project.transcript && (
+        {project.status === "ready" && project.clips && (
           <Notice tone="success">
-            Vídeo transcrito. A sugestão automática de cortes será adicionada na próxima etapa do desenvolvimento.
+            Cortes sugeridos. Revise, ajuste e aprove os melhores trechos. A geração das legendas e do formato vertical chega
+            na próxima etapa do desenvolvimento.
+          </Notice>
+        )}
+        {project.status === "ready" && project.transcript && !project.clips && (
+          <Notice tone="info">
+            Vídeo transcrito. Clique em <strong>Sugerir cortes</strong> para encontrar os melhores trechos.
           </Notice>
         )}
         {project.status === "ready" && project.audio && !project.transcript && (
@@ -249,7 +267,14 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               <video
                 ref={videoRef}
                 key={project.source.filename}
-                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onTimeUpdate={(e) => {
+                  const time = e.currentTarget.currentTime;
+                  setCurrentTime(time);
+                  if (previewEnd.current !== null && time >= previewEnd.current) {
+                    e.currentTarget.pause();
+                    previewEnd.current = null;
+                  }
+                }}
                 className="aspect-video w-full bg-black"
                 src={api.sourceUrl(project.id)}
                 poster={api.thumbnailUrl(project) ?? undefined}
@@ -277,6 +302,17 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               </div>
             )}
           </section>
+
+          <ClipsPanel
+            project={project}
+            currentTime={currentTime}
+            onPreview={preview}
+            onProjectChange={(p) => {
+              setData(p);
+              void refresh();
+            }}
+            onError={showError}
+          />
 
           <TranscriptPanel
             project={project}

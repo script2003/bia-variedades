@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { makeProject, mockFetch, sampleTranscript } from "../test/fixtures";
+import { makeProject, mockFetch, sampleClipSet, sampleTranscript } from "../test/fixtures";
 import ProjectDetailPage from "./ProjectDetailPage";
 
 function renderPage(id: string) {
@@ -23,10 +23,12 @@ describe("ProjectDetailPage", () => {
       mockFetch({
         [`GET /api/projects/${project.id}`]: () => ({ body: project }),
         [`GET /api/projects/${project.id}/transcript`]: () => ({ body: sampleTranscript }),
+        [`GET /api/projects/${project.id}/clips`]: () => ({ body: sampleClipSet }),
       }).fn,
     );
     renderPage(project.id);
-    expect(await screen.findByText(/Vídeo transcrito\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Cortes sugeridos\. Revise/)).toBeInTheDocument();
+    expect(await screen.findByRole("article", { name: /Corte 1: Por que a maioria/ })).toBeInTheDocument();
     expect(await screen.findByText("Hoje vamos falar de educação.")).toBeInTheDocument();
     expect(screen.getByLabelText("Áudio extraído")).toBeInTheDocument();
     expect(document.querySelector("video")?.getAttribute("poster")).toContain("/thumbnail?v=");

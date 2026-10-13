@@ -55,6 +55,11 @@ from .schemas import (
     Project,
     ProjectStatus,
     ProjectUpdate,
+    Clip,
+    ClipCreate,
+    ClipSet,
+    ClipsSummary,
+    ClipUpdate,
     SourceInfo,
     SystemStats,
     Transcript,
@@ -63,11 +68,15 @@ from .schemas import (
     utcnow,
 )
 from .storage import ProjectNotFound, ProjectStore, SettingsStore, atomic_write_text, is_valid_project_id
+from .clips import ClipAnalyzer, detect_clips, partial_energy
 from .transcription import WhisperEngine
 
 logger = logging.getLogger(__name__)
 
 TRANSCRIPT_FILENAME = "transcript.json"
+CLIPS_FILENAME = "clips.json"
+MAX_CLIP_SECONDS = 180.0
+MIN_CLIP_SECONDS = 1.0
 INTERRUPTED_MESSAGE = (
     "A aplicação foi encerrada antes de concluir esta tarefa. Clique em “Tentar novamente” para retomar."
 )
@@ -111,6 +120,7 @@ class ProjectService:
         self.engine = engine or WhisperEngine(config.models_dir, extra_options=dict(config.whisper_options or {}))
         self._job_projects: dict[str, str] = {}
         self._job_lock = threading.Lock()
+        self._clips_lock = threading.RLock()
         self.jobs = JobManager(listener=self, max_workers=config.max_workers)
 
     # ------------------------------------------------------------------ consultas
@@ -137,6 +147,63 @@ class ProjectService:
         if path is None or not path.is_file():
             raise ServiceError(404, "Este projeto ainda não foi transcrito.")
         return Transcript.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def get_clips(self, project_id: str) -> ClipSet:
+        project = self.get(project_id)
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
+        return clip_set
+
+    def detect(self, project_id: str, keep_curated: bool = True) -> Project:
+        """Gera (ou refaz) as sugestões de cortes a partir da transcrição."""
+        project = self.get(project_id)
+        if project.job is not None and self.jobs.is_active(project.job.id):
+            raise ServiceError(409, "Já existe uma tarefa em andamento neste projeto.")
+        if project.transcript is None:
+            raise ServiceError(409, "Transcreva o vídeo antes de sugerir cortes.")
+        return self._start_job(project_id, "detect_clips", "detecting_clips", self._detect_task(project_id, keep_curated))
+
+    def create_clip(self, project_id: str, data: ClipCreate) -> Clip:
+        with self._clips_lock:
+            project, clip_set, analyzer, audio = self._clip_editing_context(project_id)
+            start, end = self._validate_range(project, data.start, data.end)
+            clip = analyzer.evaluate_range(
+                start, end, title=(data.title or "").strip() or None, origin="manual", status="approved", edited=True
+            )
+            self._attach_energy(analyzer, audio, clip_set, clip)
+            clip_set.clips.append(clip)
+            self._save_clips(project_id, clip_set)
+            return clip
+
+    def update_clip(self, project_id: str, clip_id: str, data: ClipUpdate) -> Clip:
+        with self._clips_lock:
+            project, clip_set, analyzer, audio = self._clip_editing_context(project_id)
+            index = self._clip_index(clip_set, clip_id)
+            clip = clip_set.clips[index]
+            title = data.title.strip() if data.title is not None else clip.title
+            status = data.status or clip.status
+            if data.start is not None or data.end is not None:
+                start, end = self._validate_range(
+                    project,
+                    data.start if data.start is not None else clip.start,
+                    data.end if data.end is not None else clip.end,
+                )
+                updated = analyzer.evaluate_range(start, end, title=title, status=status, origin=clip.origin, edited=True)
+                self._attach_energy(analyzer, audio, clip_set, updated)
+                updated.id, updated.created_at = clip.id, clip.created_at
+            else:
+                updated = clip.model_copy(update={"title": title, "status": status, "edited": clip.edited or data.title is not None})
+            updated.updated_at = utcnow()
+            clip_set.clips[index] = updated
+            self._save_clips(project_id, clip_set)
+            return updated
+
+    def delete_clip(self, project_id: str, clip_id: str) -> None:
+        with self._clips_lock:
+            _project, clip_set, _analyzer, _audio = self._clip_editing_context(project_id, need_analyzer=False)
+            del clip_set.clips[self._clip_index(clip_set, clip_id)]
+            self._save_clips(project_id, clip_set)
 
     def thumbnail_path(self, project_id: str) -> Path:
         project = self.get(project_id)
@@ -344,7 +411,9 @@ class ProjectService:
         needs_audio = project.status == "ready" and project.audio is None
         if project.status not in ("failed", "cancelled", "interrupted") and not needs_audio:
             raise ServiceError(409, "Este projeto não precisa ser reprocessado.")
-        # Se a falha foi na transcrição, retoma só a transcrição (o áudio já está pronto).
+        # Retoma só a etapa que falhou quando as anteriores já estão prontas.
+        if project.job is not None and project.job.kind == "detect_clips" and project.transcript is not None:
+            return self._start_job(project_id, "detect_clips", "detecting_clips", self._detect_task(project_id, True))
         if project.job is not None and project.job.kind == "transcribe" and self._has_audio(project):
             return self._start_job(project_id, "transcribe", "transcribing", self._transcribe_task(project_id))
         source_file = (
@@ -531,6 +600,100 @@ class ProjectService:
 
         return task
 
+    def _detect_task(self, project_id: str, keep_curated: bool):
+        def task(ctx: JobContext) -> None:
+            project = self.store.get(project_id)
+            transcript = self.get_transcript(project_id)
+            weights = self.settings_store.get().clip_detection.weights
+            keep: list[Clip] = []
+            if keep_curated:
+                previous = self._load_clips(project)
+                if previous is not None:
+                    keep = [c for c in previous.clips if c.status != "suggested" or c.origin == "manual" or c.edited]
+            audio = self.store.project_dir(project_id) / project.audio.filename if self._has_audio(project) else None
+            clip_set = detect_clips(
+                transcript,
+                duration_preset=project.settings.duration,
+                max_clips=project.settings.max_clips,
+                weights=weights,
+                energy_source=audio,
+                keep=keep,
+                progress=lambda fraction, message: ctx.progress(fraction, message),
+            )
+            ctx.check_cancelled()
+            with self._clips_lock:
+                self._save_clips(project_id, clip_set)
+
+        return task
+
+    # ------------------------------------------------------------------ cortes (armazenamento)
+
+    def _load_clips(self, project: Project) -> ClipSet | None:
+        if project.clips is None:
+            return None
+        path = self.store.project_dir(project.id) / project.clips.filename
+        if not path.is_file():
+            return None
+        return ClipSet.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def _save_clips(self, project_id: str, clip_set: ClipSet) -> None:
+        clip_set.clips.sort(key=lambda c: (c.status == "rejected", -c.score))
+        atomic_write_text(self.store.project_dir(project_id) / CLIPS_FILENAME, clip_set.model_dump_json())
+        summary = ClipsSummary(
+            filename=CLIPS_FILENAME,
+            count=sum(1 for c in clip_set.clips if c.status != "rejected"),
+            approved=sum(1 for c in clip_set.clips if c.status == "approved"),
+            generated_at=clip_set.generated_at,
+        )
+        self.store.update(project_id, lambda p: setattr(p, "clips", summary))
+
+    def _clip_editing_context(self, project_id: str, need_analyzer: bool = True):
+        project = self.get(project_id)
+        if project.job is not None and self.jobs.is_active(project.job.id) and project.job.kind == "detect_clips":
+            raise ServiceError(409, "Aguarde a detecção de cortes terminar para editar.")
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(409, "Gere as sugestões de cortes antes de editá-las.")
+        analyzer = None
+        if need_analyzer:
+            transcript = self.get_transcript(project_id)
+            analyzer = ClipAnalyzer(transcript, clip_set.weights, clip_set.duration_preset)
+        audio = self.store.project_dir(project_id) / project.audio.filename if self._has_audio(project) else None
+        return project, clip_set, analyzer, audio
+
+    def _attach_energy(self, analyzer: ClipAnalyzer, audio: Path | None, clip_set: ClipSet, clip: Clip) -> None:
+        """Recalcula o critério de ênfase medindo só o trecho do corte."""
+        if audio is None or clip_set.audio_reference_db is None:
+            return
+        analyzer.energy = partial_energy(audio, clip.start, clip.end, clip_set.audio_reference_db)
+        if analyzer.energy is None:
+            return
+        rescored = analyzer.evaluate_range(
+            clip.start, clip.end, title=clip.title, status=clip.status, origin=clip.origin, edited=clip.edited
+        )
+        clip.score, clip.components = rescored.score, rescored.components
+        clip.highlights, clip.warnings = rescored.highlights, rescored.warnings
+
+    @staticmethod
+    def _clip_index(clip_set: ClipSet, clip_id: str) -> int:
+        for index, clip in enumerate(clip_set.clips):
+            if clip.id == clip_id:
+                return index
+        raise ServiceError(404, "Corte não encontrado.")
+
+    @staticmethod
+    def _validate_range(project: Project, start: float, end: float) -> tuple[float, float]:
+        limit = project.media.duration_seconds if project.media else None
+        if limit is not None and start >= limit:
+            raise ServiceError(422, "O início do corte está depois do fim do vídeo.")
+        if limit is not None:
+            end = min(end, limit)
+        if end - start < MIN_CLIP_SECONDS:
+            raise ServiceError(422, "O fim do corte precisa ser pelo menos 1 segundo depois do início.")
+        if end - start > MAX_CLIP_SECONDS:
+            raise ServiceError(422, f"Um corte pode ter no máximo {int(MAX_CLIP_SECONDS)} segundos.")
+        return start, end
+
     def _verify_source(self, ctx: JobContext, project_id: str, start: float, end: float) -> None:
         project = self.store.get(project_id)
         if not project.source.filename:
@@ -589,7 +752,9 @@ class ProjectService:
         self._update_job(job_id, mutate)
 
     def job_finished(self, job_id: str, status: str, error: str | None) -> None:
-        auto_transcribe = status == "completed" and self.settings_store.get().transcription.auto_transcribe
+        settings = self.settings_store.get()
+        auto_transcribe = status == "completed" and settings.transcription.auto_transcribe
+        auto_detect = status == "completed" and settings.clip_detection.auto_detect
         next_job: JobInfo | None = None
 
         def mutate(project: Project) -> None:
@@ -614,6 +779,10 @@ class ProjectService:
                     next_job = JobInfo(kind="transcribe", message="Na fila")
                     project.job = next_job
                     project.status = "transcribing"
+                elif auto_detect and project.job.kind == "transcribe" and project.transcript is not None:
+                    next_job = JobInfo(kind="detect_clips", message="Na fila")
+                    project.job = next_job
+                    project.status = "detecting_clips"
             elif status == "cancelled":
                 project.job.message = "Cancelado pelo usuário"
                 project.status = "cancelled"
@@ -626,7 +795,12 @@ class ProjectService:
             project_id = self._job_projects.get(job_id)
         self._update_job(job_id, mutate, release=True)
         if next_job is not None and project_id is not None:
-            self._submit_existing_job(project_id, next_job, self._transcribe_task(project_id))
+            task = (
+                self._transcribe_task(project_id)
+                if next_job.kind == "transcribe"
+                else self._detect_task(project_id, keep_curated=True)
+            )
+            self._submit_existing_job(project_id, next_job, task)
 
     def _submit_existing_job(self, project_id: str, job: JobInfo, task) -> None:
         with self._job_lock:
@@ -634,7 +808,7 @@ class ProjectService:
         try:
             self.jobs.submit(job.id, task)
         except RuntimeError:  # aplicação sendo encerrada: a tarefa será marcada como interrompida
-            logger.warning("Transcrição automática de %s não iniciada: aplicação encerrando.", project_id)
+            logger.warning("Etapa automática de %s não iniciada: aplicação encerrando.", project_id)
 
 
 def _too_large_message(settings: AppSettings) -> str:
