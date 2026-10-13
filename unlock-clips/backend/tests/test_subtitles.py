@@ -5,10 +5,14 @@ import pytest
 from app.subtitles import (
     TEMPLATES,
     CueWord,
+    TextCue,
     _ass_color,
+    auto_text_cues,
     balance_lines,
     build_cues,
+    cues_from_text,
     layout_for,
+    merge_edits,
     to_ass,
     to_srt,
 )
@@ -125,3 +129,72 @@ def test_libass_accepts_every_template(tmp_path, style):
     )  # fmt: skip
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "out.png").stat().st_size > 0
+
+
+# ---------------------------------------------------------------------- edição (Etapa 6)
+
+
+def test_auto_text_cues_keep_punctuation_and_absolute_times():
+    words = words_from(SPEECH)
+    cues = auto_text_cues(words, 10.0, 40.0, 30)
+    assert cues[0].start == pytest.approx(10.0) and any(c.text.endswith("dinheiro?") for c in cues)
+    assert any("," in c.text for c in cues)  # o editor mostra a pontuação original
+    assert " ".join(c.text for c in cues) == " ".join(w[2].strip() for w in words)
+    assert all(not c.edited and not c.hidden for c in cues)
+
+
+def test_merge_edits_keeps_edits_and_fills_gaps_from_transcript():
+    words = words_from(SPEECH)
+    auto = auto_text_cues(words, 10.0, 40.0, 30)
+    edit = TextCue(auto[1].start, auto[1].end, "Texto  corrigido pelo usuário")
+    merged = merge_edits(words, 10.0, 40.0, 30, [edit])
+    assert [c.text for c in merged] == [auto[0].text, "Texto corrigido pelo usuário", *[c.text for c in auto[2:]]]
+    assert merged[1].edited and not merged[0].edited
+
+    # Bloco igual à transcrição não conta como editado; bloco oculto conta.
+    same = merge_edits(words, 10.0, 40.0, 30, [TextCue(auto[0].start, auto[0].end, auto[0].text)])
+    assert not same[0].edited
+    hidden = merge_edits(words, 10.0, 40.0, 30, [TextCue(auto[0].start, auto[0].end, auto[0].text, hidden=True)])
+    assert hidden[0].edited and hidden[0].hidden
+
+    # Corte encurtado: a edição fora do trecho some; a que fica é limitada ao novo fim.
+    shorter = merge_edits(words, 10.0, auto[1].start + 0.5, 30, [edit])
+    assert shorter[-1].text == "Texto corrigido pelo usuário" and shorter[-1].end == pytest.approx(auto[1].start + 0.5)
+
+
+def test_cues_from_text_reuses_word_timings_when_word_count_matches():
+    words = words_from(SPEECH)
+    auto = auto_text_cues(words, 10.0, 40.0, 30)
+    first = auto[0]
+    tokens = first.text.split()
+    edited = TextCue(first.start, first.end, " ".join(t.upper() if k == 0 else t for k, t in enumerate(tokens)), edited=True)
+    [cue] = cues_from_text([edited], words, 10.0, 40.0, 30)
+    original = [w for w in words if first.start <= (w[0] + w[1]) / 2 < first.end]
+    assert [round(w.start, 3) for w in cue.words] == [round(o[0] - 10.0, 3) for o in original]
+    assert cue.words[0].text == tokens[0].upper() and cue.words[-1].text == tokens[-1]  # mantém a pontuação editada
+    assert cue.start == pytest.approx(first.start - 10.0) and cue.end == pytest.approx(first.end - 10.0)
+
+
+def test_cues_from_text_distributes_new_words_and_splits_long_text():
+    words = words_from(SPEECH)
+    text = "uma frase completamente nova escrita pelo usuário para substituir o trecho original inteiro agora"
+    cue_in = TextCue(12.0, 16.0, text, edited=True)
+    cues = cues_from_text([cue_in], words, 10.0, 40.0, 20, uppercase=True)
+    assert len(cues) > 1  # não cabe em duas linhas de 20 caracteres
+    assert cues[0].start == pytest.approx(2.0) and cues[-1].end == pytest.approx(6.0)
+    all_words = [w for c in cues for w in c.words]
+    assert " ".join(w.text for w in all_words) == text.upper()
+    starts = [w.start for w in all_words]
+    assert starts == sorted(starts) and starts[0] >= 2.0 and all_words[-1].end <= 6.0 + 1e-6
+    assert all(len(c.lines) <= 2 for c in cues)
+    for a, b in zip(cues, cues[1:]):
+        assert a.end <= b.start + 1e-6
+
+
+def test_cues_from_text_skips_hidden_and_empty_blocks():
+    words = words_from(SPEECH)
+    cues = cues_from_text(
+        [TextCue(10.0, 12.0, "visível"), TextCue(12.0, 14.0, "oculta", hidden=True), TextCue(14.0, 15.0, "  ")],
+        words, 10.0, 40.0, 30,
+    )  # fmt: skip
+    assert [c.text for c in cues] == ["visível"]

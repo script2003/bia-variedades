@@ -17,10 +17,30 @@ from functools import lru_cache
 from pathlib import Path
 
 from .ffmpeg import _CREATION_FLAGS, FFmpegTools, MediaError, probe, run_ffmpeg
-from .framing import OUTPUT_SIZES, FaceDetector, FramingPlan, center_plan, choose_face, face_detection_status, face_plan, sample_frames
+from .framing import (
+    OUTPUT_SIZES,
+    FaceDetector,
+    FramingPlan,
+    center_plan,
+    choose_face,
+    face_detection_status,
+    face_plan,
+    manual_plan,
+    sample_frames,
+)
 from .jobs import JobContext
-from .schemas import ClipSettings, MediaInfo, Transcript
-from .subtitles import TEMPLATES, Cue, SubtitleLayout, build_cues, layout_for, to_ass
+from .schemas import ClipSettings, FramingOverride, MediaInfo, SubtitleCueEdit, Transcript
+from .subtitles import (
+    TEMPLATES,
+    Cue,
+    SubtitleLayout,
+    TextCue,
+    build_cues,
+    cues_from_text,
+    layout_for,
+    merge_edits,
+    to_ass,
+)
 
 ASS_NAME = "legendas.ass"
 MAX_FPS = 60
@@ -65,12 +85,46 @@ class SubtitlePlan:
     highlight: bool
 
 
-def plan_subtitles(transcript: Transcript, start: float, end: float, settings: ClipSettings) -> SubtitlePlan:
+def subtitle_layout(settings: ClipSettings) -> SubtitleLayout:
     width, height = OUTPUT_SIZES[settings.aspect_ratio]
     template = TEMPLATES[settings.subtitle_style]
-    layout = layout_for(template, width, height, settings.subtitle_font_size, settings.subtitle_position)
-    cues = build_cues(transcript_words(transcript), start, end, layout.max_chars, uppercase=template.uppercase)
+    return layout_for(template, width, height, settings.subtitle_font_size, settings.subtitle_position)
+
+
+def editable_cues(
+    transcript: Transcript,
+    start: float,
+    end: float,
+    settings: ClipSettings,
+    edits: list[SubtitleCueEdit] | None = None,
+) -> list[TextCue]:
+    """Blocos de legenda do corte como texto (o que o editor mostra), com as edições aplicadas."""
+    words = transcript_words(transcript)
+    layout = subtitle_layout(settings)
+    text_edits = [TextCue(e.start, e.end, e.text, e.hidden) for e in edits or []]
+    return merge_edits(words, start, end, layout.max_chars, text_edits)
+
+
+def plan_subtitles(
+    transcript: Transcript,
+    start: float,
+    end: float,
+    settings: ClipSettings,
+    edits: list[SubtitleCueEdit] | None = None,
+) -> SubtitlePlan:
+    template = TEMPLATES[settings.subtitle_style]
+    layout = subtitle_layout(settings)
+    words = transcript_words(transcript)
+    if edits is None:
+        cues = build_cues(words, start, end, layout.max_chars, uppercase=template.uppercase)
+    else:
+        text_cues = editable_cues(transcript, start, end, settings, edits)
+        cues = cues_from_text(text_cues, words, start, end, layout.max_chars, uppercase=template.uppercase)
     return SubtitlePlan(cues, layout, template.key, settings.highlight_current_word)
+
+
+def requested_framing(settings: ClipSettings, override: FramingOverride | None) -> str:
+    return override.mode if override is not None else settings.framing
 
 
 def _source_size(media: MediaInfo) -> tuple[int, int]:
@@ -112,6 +166,8 @@ def render_clip(
     settings: ClipSettings,
     output: Path,
     *,
+    framing: FramingOverride | None = None,
+    subtitle_edits: list[SubtitleCueEdit] | None = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
 ) -> RenderResult:
@@ -119,14 +175,17 @@ def render_clip(
     src_w, src_h = _source_size(media)
     duration = end - start
     span = progress_end - progress_start
-    framing_end = progress_start + (span * 0.25 if settings.framing == "rosto" else 0.0)
+    mode = requested_framing(settings, framing)
+    framing_end = progress_start + (span * 0.25 if mode == "rosto" else 0.0)
 
-    if settings.framing == "rosto":
+    if mode == "rosto":
         plan = face_plan(ctx, tools, source, start, duration, src_w, src_h, settings.aspect_ratio,
                          progress_start=progress_start, progress_end=framing_end)  # fmt: skip
+    elif mode == "manual" and framing is not None:
+        plan = manual_plan(src_w, src_h, settings.aspect_ratio, framing.x, framing.y, framing.zoom)
     else:
         plan = center_plan(src_w, src_h, settings.aspect_ratio)
-    subtitles = plan_subtitles(transcript, start, end, settings)
+    subtitles = plan_subtitles(transcript, start, end, settings, subtitle_edits)
     audio = media.preferred_audio()
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -207,15 +266,27 @@ def render_frame(
     end: float,
     settings: ClipSettings,
     at: float,
+    *,
+    framing: FramingOverride | None = None,
+    subtitle_edits: list[SubtitleCueEdit] | None = None,
+    plan: FramingPlan | None = None,
 ) -> bytes:
-    """Gera um JPEG do quadro em ``at`` segundos do corte, exatamente como no vídeo final."""
+    """Gera um JPEG do quadro em ``at`` segundos do corte, exatamente como no vídeo final.
+
+    ``plan`` permite reutilizar um enquadramento já calculado (ex.: o acompanhamento de rosto).
+    """
     src_w, src_h = _source_size(media)
     at = min(max(at, 0.0), max(end - start - 0.05, 0.0))
-    if settings.framing == "rosto":
+    mode = requested_framing(settings, framing)
+    if plan is not None:
+        plan = FramingPlan(plan.mode, plan.crop_w, plan.crop_h, plan.x_at(at), plan.y)
+    elif mode == "rosto":
         plan = _single_frame_plan(tools, source, start + at, src_w, src_h, settings.aspect_ratio)
+    elif mode == "manual" and framing is not None:
+        plan = manual_plan(src_w, src_h, settings.aspect_ratio, framing.x, framing.y, framing.zoom)
     else:
         plan = center_plan(src_w, src_h, settings.aspect_ratio)
-    subtitles = plan_subtitles(transcript, start, end, settings)
+    subtitles = plan_subtitles(transcript, start, end, settings, subtitle_edits)
     with tempfile.TemporaryDirectory(prefix="unlock-frame-") as work:
         work_dir = Path(work)
         has_subtitles = bool(subtitles.cues)

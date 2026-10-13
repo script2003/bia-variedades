@@ -1,6 +1,8 @@
 """Enquadramento dos cortes nos formatos 9:16, 1:1 e 16:9.
 
 * **Central**: recorte fixo no centro do quadro (preenche todo o formato de saída).
+* **Posição fixa (manual)**: o usuário escolhe no editor a posição horizontal/vertical do
+  recorte e um zoom de até 3×.
 * **Acompanhar rosto**: amostra 2 quadros por segundo, detecta rostos com o modelo
   YuNet (OpenCV, incluído no projeto, funciona offline) e move uma "câmera virtual"
   horizontal suave: só se desloca quando o rosto sai da zona central, sem tremer.
@@ -50,7 +52,7 @@ def crop_size(src_w: int, src_h: int, aspect: str) -> tuple[int, int]:
 
 @dataclass
 class FramingPlan:
-    mode: str  # "centro" ou "rosto" (o que foi efetivamente usado)
+    mode: str  # "centro", "rosto" ou "manual" (o que foi efetivamente usado)
     crop_w: int
     crop_h: int
     x: float  # posição fixa (quando não há pontos-chave)
@@ -86,6 +88,24 @@ class FramingPlan:
 def center_plan(src_w: int, src_h: int, aspect: str, note: str | None = None) -> FramingPlan:
     cw, ch = crop_size(src_w, src_h, aspect)
     return FramingPlan(mode="centro", crop_w=cw, crop_h=ch, x=(src_w - cw) // 2, y=(src_h - ch) // 2, notes=[note] if note else [])
+
+
+def manual_plan(src_w: int, src_h: int, aspect: str, x: float, y: float, zoom: float) -> FramingPlan:
+    """Recorte fixo na posição escolhida pelo usuário (``x``/``y`` de 0 a 1 no espaço livre)."""
+    base_w, base_h = crop_size(src_w, src_h, aspect)
+    zoom = min(max(zoom, 1.0), 3.0)
+    cw = min(base_w, _even(base_w / zoom))
+    ch = min(base_h, _even(base_h / zoom))
+    px = round((src_w - cw) * min(max(x, 0.0), 1.0))
+    py = round((src_h - ch) * min(max(y, 0.0), 1.0))
+    notes: list[str] = []
+    out_w = OUTPUT_SIZES[aspect][0]
+    if cw * 2.5 < out_w:
+        notes.append(
+            f"Zoom alto: o recorte tem só {cw}×{ch} px do vídeo original e será ampliado para o formato final, "
+            "o que pode deixar a imagem desfocada."
+        )
+    return FramingPlan(mode="manual", crop_w=cw, crop_h=ch, x=px, y=py, notes=notes)
 
 
 # ---------------------------------------------------------------------- detecção de rostos

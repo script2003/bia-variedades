@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import ClipEditorPage from "./pages/ClipEditorPage";
 import CreatePage from "./pages/CreatePage";
 import DashboardPage from "./pages/DashboardPage";
 import ExportsPage from "./pages/ExportsPage";
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="criar" element={<CreatePage />} />
         <Route path="projetos" element={<ProjectsPage />} />
         <Route path="projetos/:projectId" element={<ProjectDetailPage />} />
+        <Route path="projetos/:projectId/cortes/:clipId" element={<ClipEditorPage />} />
         <Route path="exportados" element={<ExportsPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />

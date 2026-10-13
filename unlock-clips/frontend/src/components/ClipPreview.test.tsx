@@ -1,17 +1,27 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { makeClip, makeProject, makeRender, mockFetch, sampleSubtitles } from "../test/fixtures";
-import ClipPreview, { SubtitleOverlay, activeCueIndex, activeWordIndex, cropXAt, objectPosition } from "./ClipPreview";
+import { makeClip, makeProject, makeRender, mockFetch, sampleFraming, sampleSubtitles } from "../test/fixtures";
+import { cropRectAt, cropXAt, videoCropStyle } from "../lib/framing";
+import { activeCueIndex, activeWordIndex } from "../lib/subtitles";
+import ClipPreview from "./ClipPreview";
+import { SubtitleOverlay } from "./LivePlayer";
 
 const project = makeProject();
 const clip = makeClip();
 
-function setup(overrides = {}) {
+function stubFetch(framing: unknown = sampleFraming) {
   vi.stubGlobal(
     "fetch",
-    mockFetch({ [`GET /api/projects/${project.id}/clips/${clip.id}/subtitles`]: () => ({ body: sampleSubtitles }) }).fn,
+    mockFetch({
+      [`GET /api/projects/${project.id}/clips/${clip.id}/subtitles`]: () => ({ body: sampleSubtitles }),
+      [`GET /api/projects/${project.id}/clips/${clip.id}/framing`]: () => ({ body: framing }),
+    }).fn,
   );
+}
+
+function setup(overrides = {}) {
+  stubFetch();
   const onClose = vi.fn();
   render(<ClipPreview project={project} clip={clip} onClose={onClose} {...overrides} />);
   return { onClose };
@@ -79,7 +89,7 @@ describe("ClipPreview", () => {
     setup();
     await user.click(screen.getByRole("tab", { name: "Quadro final (exato)" }));
     const image = screen.getByRole("img", { name: /Quadro final em 0:00.0/ });
-    expect(image.getAttribute("src")).toBe(`/api/projects/${project.id}/clips/${clip.id}/frame.jpg?t=0.00`);
+    expect(image.getAttribute("src")).toMatch(new RegExp(`^/api/projects/${project.id}/clips/${clip.id}/frame.jpg\\?t=0.00&v=`));
     expect(screen.getByText(/Gerando o quadro com o FFmpeg/)).toBeInTheDocument();
     fireEvent.load(image);
     expect(screen.queryByText(/Gerando o quadro/)).not.toBeInTheDocument();
@@ -88,14 +98,11 @@ describe("ClipPreview", () => {
   });
 
   it("mostra o vídeo gerado com download e aviso de desatualizado", async () => {
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({ [`GET /api/projects/${project.id}/clips/${clip.id}/subtitles`]: () => ({ body: sampleSubtitles }) }).fn,
-    );
+    stubFetch();
     const rendered = makeClip({ render: makeRender({ stale: true, notes: ["Rosto encontrado em só 20% do trecho."] }) });
     render(<ClipPreview project={project} clip={rendered} initialTab="rendered" onClose={vi.fn()} />);
     const url = `/api/projects/${project.id}/exports/por-que-a-maioria-clip-1-9x16.mp4`;
-    expect(document.querySelector("video")?.getAttribute("src")).toBe(url);
+    expect(document.querySelector("video")?.getAttribute("src")).toBe(`${url}?download=false`);
     expect(screen.getByRole("link", { name: /Baixar MP4 \(4,0 MB\)/ })).toHaveAttribute("href", url);
     expect(screen.getByText(/gerado antes das últimas alterações/)).toBeInTheDocument();
     expect(screen.getByText("Rosto encontrado em só 20% do trecho.")).toBeInTheDocument();
@@ -113,6 +120,8 @@ describe("ClipPreview", () => {
 describe("enquadramento na prévia ao vivo", () => {
   const framing = {
     mode: "rosto" as const,
+    requested: "rosto" as const,
+    override: null,
     source_width: 1280,
     source_height: 720,
     crop_width: 404,
@@ -126,31 +135,34 @@ describe("enquadramento na prévia ao vivo", () => {
     notes: [],
   };
 
-  it("converte a posição do recorte em object-position", () => {
+  it("posiciona o vídeo para mostrar só o recorte", () => {
     expect(cropXAt(framing, 5)).toBe(488);
     expect(cropXAt(framing, 20)).toBe(876);
-    expect(objectPosition(framing, 0)).toBe("11.42% 50.00%");
-    expect(objectPosition(framing, 10)).toBe("100.00% 50.00%");
-    expect(objectPosition(null, 3)).toBe("50% 50%");
+    // Caixa de 202 px de largura = recorte de 404 px na escala 0,5.
+    expect(videoCropStyle(cropRectAt(framing, 0), 1280, 720, 202)).toEqual({
+      position: "absolute",
+      left: -50,
+      top: -0,
+      width: 640,
+      height: 360,
+      maxWidth: "none",
+    });
+    expect(videoCropStyle(cropRectAt(framing, 10), 1280, 720, 202).left).toBe(-438);
   });
 
   it("usa o enquadramento por rosto calculado pelo servidor", async () => {
     const rostoProject = makeProject({ settings: { ...project.settings, framing: "rosto" } });
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({
-        [`GET /api/projects/${project.id}/clips/${clip.id}/subtitles`]: () => ({ body: sampleSubtitles }),
-        [`GET /api/projects/${project.id}/clips/${clip.id}/framing`]: () => ({ body: framing }),
-      }).fn,
-    );
+    stubFetch(framing);
     render(<ClipPreview project={rostoProject} clip={clip} onClose={vi.fn()} />);
     expect(await screen.findByText("Acompanhamento do rosto aplicado à prévia.")).toBeInTheDocument();
     const video = document.querySelector("video") as HTMLVideoElement;
-    expect(video.style.objectPosition).toBe("11.42% 50.00%");
+    // jsdom não mede a caixa: a largura inicial de 270 px dá escala 270/404.
+    expect(parseFloat(video.style.left)).toBeCloseTo((-100 * 270) / 404, 6);
+    expect(parseFloat(video.style.width)).toBeCloseTo((1280 * 270) / 404, 6);
   });
 
   it("avisa quando o navegador não reproduz o MP4 gerado", () => {
-    vi.stubGlobal("fetch", mockFetch({ [`GET /api/projects/${project.id}/clips/${clip.id}/subtitles`]: () => ({ body: sampleSubtitles }) }).fn);
+    stubFetch();
     render(<ClipPreview project={project} clip={makeClip({ render: makeRender() })} initialTab="rendered" onClose={vi.fn()} />);
     fireEvent.error(document.querySelector("video") as HTMLVideoElement);
     expect(screen.getByText(/não conseguiu reproduzir o MP4/)).toBeInTheDocument();

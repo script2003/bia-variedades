@@ -9,13 +9,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 DurationPreset = Literal["15-30", "30-60", "60-90"]
 AspectRatio = Literal["9:16", "1:1", "16:9"]
 SubtitleStyle = Literal["classico", "destaque", "caixa", "minimalista"]
 SubtitlePosition = Literal["inferior", "centro", "superior"]
 FramingMode = Literal["centro", "rosto"]
+ClipFramingMode = Literal["centro", "rosto", "manual"]
 
 # "validate" é mantido para ler projetos criados na Etapa 1.
 JobKind = Literal["process", "import_link", "transcribe", "detect_clips", "render_clips", "validate"]
@@ -342,13 +343,39 @@ class RenderInfo(BaseModel):
     height: int
     duration_seconds: float
     size_bytes: int
-    framing: FramingMode
+    framing: ClipFramingMode
     subtitle_style: SubtitleStyle
     subtitle_cues: int
     signature: str  # configuração usada; se mudar, o vídeo fica desatualizado
     notes: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     stale: bool = False  # calculado ao consultar
+
+
+class FramingOverride(BaseModel):
+    """Enquadramento escolhido para um corte específico (substitui o padrão do projeto).
+
+    No modo ``manual``, ``x`` e ``y`` indicam a posição do recorte no espaço livre do quadro
+    (0 = esquerda/topo, 0,5 = centro, 1 = direita/base) e ``zoom`` aproxima a imagem.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ClipFramingMode
+    x: float = Field(default=0.5, ge=0, le=1)
+    y: float = Field(default=0.5, ge=0, le=1)
+    zoom: float = Field(default=1.0, ge=1, le=3)
+
+
+class SubtitleCueEdit(BaseModel):
+    """Bloco de legenda editado pelo usuário. Tempos em segundos do vídeo original."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    text: str = Field(default="", max_length=400)
+    hidden: bool = False
 
 
 class Clip(BaseModel):
@@ -365,6 +392,9 @@ class Clip(BaseModel):
     origin: Literal["auto", "manual"] = "auto"
     edited: bool = False
     render: RenderInfo | None = None
+    # Edições do editor: ``None`` = usa o padrão do projeto / legendas automáticas.
+    framing_override: FramingOverride | None = None
+    subtitle_cues: list[SubtitleCueEdit] | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -410,6 +440,8 @@ class ClipUpdate(BaseModel):
     start: float | None = Field(default=None, ge=0)
     end: float | None = Field(default=None, gt=0)
     status: ClipStatus | None = None
+    # Enviar ``null`` volta ao enquadramento padrão do projeto.
+    framing_override: FramingOverride | None = None
 
 
 class DetectClipsRequest(BaseModel):
@@ -457,6 +489,22 @@ class SubtitleCueOut(BaseModel):
     lines: list[list[SubtitleWordOut]]
 
 
+class EditableCue(BaseModel):
+    """Bloco de legenda como aparece no editor (tempos em segundos do vídeo original)."""
+
+    start: float
+    end: float
+    text: str
+    hidden: bool = False
+    edited: bool = False  # texto, tempo ou visibilidade diferentes da transcrição
+
+
+class SubtitleEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cues: list[SubtitleCueEdit] = Field(max_length=2000)
+
+
 class ClipSubtitles(BaseModel):
     """Legendas de um corte já divididas em blocos, para a prévia no navegador."""
 
@@ -468,13 +516,17 @@ class ClipSubtitles(BaseModel):
     margin_h: int
     highlight: bool
     template: SubtitleTemplateInfo
-    cues: list[SubtitleCueOut]
+    cues: list[SubtitleCueOut]  # tempos relativos ao início do corte, já divididos em linhas
+    editable: list[EditableCue] = Field(default_factory=list)
+    edited: bool = False  # o corte usa legendas editadas
 
 
 class ClipFraming(BaseModel):
     """Enquadramento calculado para um corte (o mesmo usado ao gerar o vídeo)."""
 
-    mode: FramingMode
+    mode: ClipFramingMode
+    requested: ClipFramingMode  # modo pedido (do corte ou do projeto)
+    override: FramingOverride | None = None
     source_width: int
     source_height: int
     crop_width: int
@@ -546,6 +598,28 @@ class ExportedVideo(BaseModel):
     url: str
     clip_id: str | None = None
     clip_title: str | None = None
+    aspect_ratio: AspectRatio | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: float | None = None
+    stale: bool = False
+
+
+class ExportsDeleted(BaseModel):
+    deleted: int
+    freed_bytes: int
+
+
+class ProjectStorage(BaseModel):
+    """Espaço em disco de um projeto (bytes)."""
+
+    project_id: str
+    source_bytes: int
+    audio_bytes: int
+    exports_bytes: int
+    other_bytes: int
+    total_bytes: int
+    exports_count: int
 
 
 class WhisperModelOption(BaseModel):

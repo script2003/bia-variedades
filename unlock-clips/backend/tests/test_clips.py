@@ -17,7 +17,7 @@ from app.clips import (
 )
 from app.schemas import SCORING_CRITERIA_DEFAULTS, Clip, Transcript, TranscriptSegment
 
-from .clip_fixtures import BORING, OPINION, PODCAST, QA, SHIFT, STORY, make_transcript
+from .clip_fixtures import BORING, PODCAST, QA, SHIFT, STORY, make_transcript
 
 
 def component(clip: Clip, key: str):

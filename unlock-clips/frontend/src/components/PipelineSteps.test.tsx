@@ -9,23 +9,26 @@ const transcriptState = (project: Project) => buildSteps(project)[4]!.state;
 const base = makeProject();
 
 describe("buildSteps", () => {
-  it("marca as seis etapas implementadas como concluídas e nunca as futuras", () => {
+  it("mostra o estado real de cada etapa", () => {
     const steps = buildSteps(base);
     expect(states(base)).toEqual(["done", "done", "done", "done"]);
     expect(transcriptState(base)).toBe("done");
     expect(steps[4]!.description).toBe("9 palavras · modelo small");
     expect(steps[5]!.state).toBe("done");
     expect(steps[5]!.description).toBe("2 corte(s) sugerido(s) · 1 aprovado(s)");
-    expect(steps[6]!.state).toBe("pending"); // nenhum vídeo gerado ainda
-    expect(steps.slice(7).every((s) => s.state === "unavailable")).toBe(true);
+    expect(steps[6]!.state).toBe("done"); // um corte aprovado
+    expect(steps[7]!.state).toBe("pending"); // nenhum vídeo gerado ainda
+    expect(steps).toHaveLength(8);
+    const noneApproved = buildSteps(makeProject({ clips: { ...base.clips!, approved: 0 } }));
+    expect(noneApproved[6]!.state).toBe("pending");
   });
 
   it("acompanha a geração dos vídeos", () => {
-    const renderState = (project: Project) => buildSteps(project)[6]!.state;
+    const renderState = (project: Project) => buildSteps(project)[7]!.state;
     const summary = base.clips!;
     expect(renderState(makeProject({ status: "rendering" }))).toBe("active");
     expect(renderState(makeProject({ clips: { ...summary, rendered: 2 } }))).toBe("done");
-    expect(buildSteps(makeProject({ clips: { ...summary, rendered: 2 } }))[6]!.description).toBe("2 vídeo(s) gerado(s) com legendas");
+    expect(buildSteps(makeProject({ clips: { ...summary, rendered: 2 } }))[7]!.description).toBe("2 vídeo(s) MP4 com legendas exportado(s)");
     const failed = makeProject({
       status: "failed",
       job: {
@@ -125,7 +128,14 @@ describe("PipelineSteps", () => {
     expect(screen.getByLabelText("Extração de áudio: concluída")).toBeInTheDocument();
     expect(screen.getByLabelText("Transcrição com timestamps: concluída")).toBeInTheDocument();
     expect(screen.getByLabelText("Identificação de cortes: concluída")).toBeInTheDocument();
-    expect(screen.getByLabelText("Legendas e formato vertical: aguardando")).toBeInTheDocument();
-    expect(screen.getByLabelText("Edição e exportação MP4: disponível em breve")).toBeInTheDocument();
+    expect(screen.getByLabelText("Revisão e edição: concluída")).toBeInTheDocument();
+    expect(screen.getByLabelText("Legendas, formato e MP4: aguardando")).toBeInTheDocument();
+  });
+
+  it("conclui revisão e exportação só com cortes aprovados e vídeos gerados", () => {
+    const summary = { filename: "clips.json", count: 3, approved: 1, generated_at: "2026-10-10T12:31:00Z", rendered: 2 };
+    render(<PipelineSteps project={{ ...base, clips: summary }} />);
+    expect(screen.getByLabelText("Revisão e edição: concluída")).toHaveTextContent("1 corte(s) aprovado(s)");
+    expect(screen.getByLabelText("Legendas, formato e MP4: concluída")).toHaveTextContent("2 vídeo(s) MP4");
   });
 });

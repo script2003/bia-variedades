@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { Project } from "../api/types";
 import { makeClip, makeProject, makeRender, mockFetch, sampleClipSet, sampleSubtitles } from "../test/fixtures";
@@ -16,7 +17,11 @@ function setup(routes: Record<string, (init?: RequestInit) => { status?: number;
   });
   vi.stubGlobal("fetch", fn);
   const handlers = { onPreview: vi.fn(), onProjectChange: vi.fn(), onError: vi.fn() };
-  render(<ClipsPanel project={project} currentTime={12.3} {...handlers} {...props} />);
+  render(
+    <MemoryRouter>
+      <ClipsPanel project={project} currentTime={12.3} {...handlers} {...props} />
+    </MemoryRouter>,
+  );
   return { calls, ...handlers };
 }
 

@@ -5,6 +5,7 @@ export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type SubtitleStyle = "classico" | "destaque" | "caixa" | "minimalista";
 export type SubtitlePosition = "inferior" | "centro" | "superior";
 export type FramingMode = "centro" | "rosto";
+export type ClipFramingMode = FramingMode | "manual";
 
 export interface ClipSettings {
   duration: DurationPreset;
@@ -72,7 +73,7 @@ export interface RenderInfo {
   height: number;
   duration_seconds: number;
   size_bytes: number;
-  framing: FramingMode;
+  framing: ClipFramingMode;
   subtitle_style: SubtitleStyle;
   subtitle_cues: number;
   signature: string;
@@ -121,11 +122,39 @@ export interface ClipSubtitles {
   margin_h: number;
   highlight: boolean;
   template: SubtitleTemplateInfo;
+  /** Tempos relativos ao início do corte, já divididos em linhas. */
   cues: SubtitleCue[];
+  /** Blocos como aparecem no editor (tempos em segundos do vídeo original). */
+  editable: EditableCue[];
+  edited: boolean;
+}
+
+export interface EditableCue {
+  start: number;
+  end: number;
+  text: string;
+  hidden: boolean;
+  edited: boolean;
+}
+
+export interface SubtitleCueEdit {
+  start: number;
+  end: number;
+  text: string;
+  hidden: boolean;
+}
+
+export interface FramingOverride {
+  mode: ClipFramingMode;
+  x: number;
+  y: number;
+  zoom: number;
 }
 
 export interface ClipFraming {
-  mode: FramingMode;
+  mode: ClipFramingMode;
+  requested: ClipFramingMode;
+  override: FramingOverride | null;
   source_width: number;
   source_height: number;
   crop_width: number;
@@ -150,6 +179,8 @@ export interface Clip {
   origin: "auto" | "manual";
   edited: boolean;
   render: RenderInfo | null;
+  framing_override: FramingOverride | null;
+  subtitle_cues: SubtitleCueEdit[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -179,6 +210,8 @@ export interface ClipUpdate {
   start?: number;
   end?: number;
   status?: ClipStatus;
+  /** `null` volta ao enquadramento padrão do projeto. */
+  framing_override?: FramingOverride | null;
 }
 
 export interface WhisperModelOption {
@@ -342,6 +375,26 @@ export interface ExportedVideo {
   url: string;
   clip_id: string | null;
   clip_title: string | null;
+  aspect_ratio: AspectRatio | null;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  stale: boolean;
+}
+
+export interface ExportsDeleted {
+  deleted: number;
+  freed_bytes: number;
+}
+
+export interface ProjectStorage {
+  project_id: string;
+  source_bytes: number;
+  audio_bytes: number;
+  exports_bytes: number;
+  other_bytes: number;
+  total_bytes: number;
+  exports_count: number;
 }
 
 export interface SystemStats {

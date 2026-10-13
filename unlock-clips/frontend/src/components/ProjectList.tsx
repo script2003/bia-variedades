@@ -1,7 +1,7 @@
-import { FileVideo, Link2 } from "lucide-react";
+import { FileVideo, HardDrive, Link2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Project } from "../api/types";
+import type { Project, ProjectStorage } from "../api/types";
 import { formatBytes, formatDuration, formatRelative } from "../lib/format";
 import JobProgress from "./JobProgress";
 import StatusBadge from "./StatusBadge";
@@ -10,9 +10,13 @@ interface Props {
   projects: Project[];
   onChange?: (project: Project) => void;
   onError?: (message: string) => void;
+  /** Espaço em disco por projeto (opcional). */
+  storage?: Map<string, ProjectStorage>;
+  /** Mostra o botão de excluir em cada projeto. */
+  onDelete?: (project: Project) => void;
 }
 
-export default function ProjectList({ projects, onChange, onError }: Props) {
+export default function ProjectList({ projects, onChange, onError, storage, onDelete }: Props) {
   return (
     <ul className="card divide-y divide-ink-700 overflow-hidden">
       {projects.map((project) => {
@@ -36,8 +40,32 @@ export default function ProjectList({ projects, onChange, onError }: Props) {
                   {project.source.original_name} · {formatBytes(project.source.size_bytes)}
                   {project.media && ` · ${formatDuration(project.media.duration_seconds)}`} · {formatRelative(project.created_at)}
                 </p>
+                {(project.clips || storage?.get(project.id)) && (
+                  <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-zinc-500">
+                    {project.clips && (
+                      <span>
+                        {project.clips.count} corte(s) · {project.clips.approved} aprovado(s) · {project.clips.rendered} vídeo(s)
+                      </span>
+                    )}
+                    {storage?.get(project.id) && (
+                      <span className="inline-flex items-center gap-1" title="Espaço em disco usado pelo projeto">
+                        <HardDrive className="size-3" aria-hidden /> {formatBytes(storage.get(project.id)!.total_bytes)}
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
               <StatusBadge status={project.status} />
+              {onDelete && (
+                <button
+                  type="button"
+                  className="btn btn-ghost px-2 text-zinc-500 hover:text-red-300"
+                  aria-label={`Excluir o projeto ${project.title}`}
+                  onClick={() => onDelete(project)}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
             </div>
             <JobProgress project={project} onChange={onChange} onError={onError} />
             {project.status === "failed" && project.error && (

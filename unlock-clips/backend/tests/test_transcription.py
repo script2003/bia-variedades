@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.jobs import JobCancelled, JobContext
 from app.main import create_app
-from app.schemas import Transcript, TranscriptionSettings, TranscriptSegment, TranscriptWord
+from app.schemas import Transcript, TranscriptionSettings, TranscriptSegment
 from app.transcription import (
     SAMPLE_RATE,
     TranscriptionError,

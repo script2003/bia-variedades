@@ -11,6 +11,7 @@ import Notice from "../components/Notice";
 import PipelineSteps from "../components/PipelineSteps";
 import ClipsPanel from "../components/ClipsPanel";
 import StatusBadge from "../components/StatusBadge";
+import StorageCard from "../components/StorageCard";
 import TranscriptPanel from "../components/TranscriptPanel";
 import { usePolling } from "../hooks/usePolling";
 import { CONTAINER_LABEL, formatBytes, formatDateTime } from "../lib/format";
@@ -239,8 +240,8 @@ function ProjectDetail({ projectId }: { projectId: string }) {
         ))}
         {project.status === "ready" && project.clips && project.clips.rendered === 0 && (
           <Notice tone="success">
-            Cortes sugeridos. Revise, ajuste e aprove os melhores trechos; depois use <strong>Gerar vídeo</strong> para criar
-            o MP4 com legendas no formato escolhido.
+            Cortes sugeridos. Revise e aprove os melhores trechos; use <strong>Abrir no editor</strong> para ajustar trecho,
+            legendas e enquadramento e exportar o MP4 com legendas no formato escolhido.
           </Notice>
         )}
         {project.status === "ready" && project.clips && project.clips.rendered > 0 && (
@@ -371,6 +372,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               <Detail label="Atualizado">{formatDateTime(project.updated_at)}</Detail>
             </dl>
           </section>
+          <StorageCard project={project} onChanged={() => void refresh()} onMessage={(tone, text) => setMessage({ tone, text })} />
         </aside>
       </div>
     </>

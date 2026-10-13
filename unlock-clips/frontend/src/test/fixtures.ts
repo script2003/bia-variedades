@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   Clip,
+  ClipFraming,
   ClipSet,
   ClipSettings,
   ClipSubtitles,
@@ -135,6 +136,8 @@ export function makeClip(overrides: Partial<Clip> = {}): Clip {
     origin: "auto",
     edited: false,
     render: null,
+    framing_override: null,
+    subtitle_cues: null,
     created_at: "2026-10-10T12:31:00Z",
     updated_at: "2026-10-10T12:31:00Z",
     ...overrides,
@@ -225,6 +228,25 @@ export const sampleSubtitles: ClipSubtitles = {
     },
     { start: 2, end: 3, lines: [[{ start: 2, end: 3, text: "DINHEIRO?" }]] },
   ],
+  editable: [
+    { start: 21.9, end: 23.5, text: "Por que guardar", hidden: false, edited: false },
+    { start: 23.9, end: 24.9, text: "dinheiro?", hidden: false, edited: false },
+  ],
+  edited: false,
+};
+
+export const sampleFraming: ClipFraming = {
+  mode: "centro",
+  requested: "centro",
+  override: null,
+  source_width: 1920,
+  source_height: 1080,
+  crop_width: 608,
+  crop_height: 1080,
+  x: 656,
+  y: 0,
+  keyframes: [],
+  notes: [],
 };
 
 /** Substitui `fetch` por um roteador simples baseado em método + caminho. */

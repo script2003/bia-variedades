@@ -20,7 +20,7 @@ pagos.
 | 3 | Transcrição com timestamps (faster-whisper) | ✅ Concluída |
 | 4 | Identificação e seleção de cortes | ✅ Concluída |
 | 5 | Legendas e conversão para formatos verticais | ✅ Concluída |
-| 6 | Editor, exportação MP4 e gerenciamento | Pendente |
+| 6 | Editor, exportação MP4 e gerenciamento | ✅ Concluída |
 | 7 | Testes, documentação e preparação para Windows | Pendente |
 
 ### O que a Etapa 1 entregou
@@ -153,7 +153,34 @@ duração do áudio. Modelos maiores são mais precisos e mais lentos; com GPU N
 
 > O detector de rostos YuNet é distribuído sob licença MIT (`app/assets/face_detection_yunet_LICENSE.txt`).
 
-As etapas que ainda não existem aparecem como **"em breve"** na tela do projeto — nada é simulado como concluído.
+### O que a Etapa 6 acrescentou
+
+- **Editor de cada corte** (botão **Abrir no editor** no painel de cortes; endereço `/projetos/<id>/cortes/<corte>`):
+  - **pré-visualização** ao vivo no formato final (recorte + legenda), **quadro exato** gerado pelo FFmpeg e o
+    **vídeo gerado**;
+  - **título** editável, **aprovar / descartar** e navegação para o corte anterior/próximo;
+  - **início e fim** com ajuste fino (±0,5 s) e "usar tempo atual" — a pontuação e as legendas são recalculadas;
+  - **legendas editáveis**: corrigir o texto de cada bloco, ocultar blocos, ajustar os tempos (validados: dentro
+    do corte e sem sobreposição), ouvir o trecho de cada bloco, voltar às legendas automáticas e baixar o `.srt`.
+    A prévia reage enquanto você digita; o vídeo usa o texto editado com o modelo de legenda do projeto (caixa-alta,
+    cores, destaque da palavra, quebra em até 2 linhas). Se o número de palavras do bloco não mudar, o destaque
+    segue o tempo real de cada palavra; se mudar, o tempo é distribuído pelo tamanho das palavras;
+  - **ajuste de enquadramento** por corte: padrão do projeto, central, acompanhar rosto ou **posição fixa (manual)**
+    com posição horizontal, vertical e **zoom até 3×**, visto na hora na prévia (aviso quando o zoom deixa a imagem
+    desfocada);
+  - **Exportar MP4** / **Gerar novamente** (salva antes as alterações pendentes) com progresso real e cancelamento,
+    e **Baixar MP4**. O vídeo fica "desatualizado" sempre que o trecho, as legendas, o enquadramento ou a
+    configuração mudam depois da geração.
+- As edições ficam salvas no projeto (`clips.json`) e são mantidas ao **gerar novas sugestões** (cortes curados) e ao
+  mudar o trecho (blocos editados fora do novo trecho são descartados; trechos novos recebem legendas automáticas).
+- **Vídeos exportados**: busca, filtro por projeto, formato, duração, aviso de desatualizado, **assistir** no
+  navegador, **baixar**, **abrir no editor**, **excluir** um vídeo ou todos de um projeto (os cortes continuam salvos
+  e podem ser exportados de novo) e a pasta onde os arquivos ficam no computador.
+- **Meus projetos**: espaço em disco de cada projeto e total, ordenação (recentes, antigos, nome, espaço),
+  contagem de cortes/aprovados/vídeos e exclusão direto na lista. Na página do projeto, o quadro **Espaço em disco**
+  detalha vídeo original, áudio, vídeos exportados e permite excluir os vídeos exportados para liberar espaço.
+- Todas as etapas do fluxo agora são reais na tela do projeto, inclusive **Revisão e edição** e **Legendas, formato
+  e MP4** — nada é simulado como concluído.
 
 ## Estrutura de pastas
 
@@ -181,7 +208,7 @@ unlock-clips/
 │   │   ├── render.py             geração do MP4 final e do quadro de prévia
 │   │   ├── assets/               modelo de detecção de rostos (YuNet, MIT)
 │   │   ├── links.py              política de links autorizados e download
-│   │   ├── services.py           regras de negócio dos projetos
+│   │   ├── services.py           regras de negócio dos projetos (inclui edição, exportados e espaço em disco)
 │   │   └── api/                  rotas HTTP (projetos e sistema)
 │   ├── tests/                    testes automatizados (pytest); tiny_whisper.py gera um modelo de teste
 │   └── data/                     criada na execução: projetos, modelos e settings.json (ignorada pelo git)
@@ -191,10 +218,11 @@ unlock-clips/
     ├── index.html
     └── src/
         ├── api/                  cliente HTTP, tipos e envio com progresso
-        ├── components/           layout, menu, painel de envio, formulários, progresso…
+        ├── components/           layout, menu, painel de envio, formulários, progresso, prévia (LivePlayer)…
+        │   └── editor/           edição de legendas e de enquadramento
         ├── hooks/usePolling.ts   atualização periódica (rápida com tarefas ativas)
-        ├── lib/                  formatação, validações e opções
-        ├── pages/                Painel, Criar cortes, Projetos, Projeto, Exportados, Configurações
+        ├── lib/                  formatação, validações, opções, cálculo do recorte e das legendas da prévia
+        ├── pages/                Painel, Criar cortes, Projetos, Projeto, Editor do corte, Exportados, Configurações
         └── test/                 utilitários de teste
 ```
 
@@ -331,15 +359,15 @@ erro ao carregar o modelo, volte para **CPU**.
    foi escolhido, ajuste início e fim, aprove ou descarte. A transcrição pode ser lida, pesquisada e baixada
    (SRT/VTT/TXT). Se mudar a duração ou a quantidade de cortes do projeto, clique em **Gerar novamente**.
 5. Escolha formato, estilo, tamanho e posição da legenda e o enquadramento em **Configurações dos cortes** (na
-   página do projeto), confira em **Prévia no formato** e clique em **Gerar vídeo** (ou **Gerar vídeos dos
-   aprovados**). Depois, **Assistir** ou **Baixar MP4**.
+   página do projeto). Valem para todos os cortes do projeto.
+6. Clique em **Abrir no editor** em um corte para ajustar título, início e fim, corrigir as legendas e o
+   enquadramento, conferir na prévia e clicar em **Exportar MP4**. Quando terminar, **Baixar MP4**. Para exportar
+   vários de uma vez, aprove-os e use **Gerar vídeos dos aprovados** no painel de cortes.
+7. Os arquivos ficam em **Vídeos exportados** (assistir, baixar, abrir no editor ou excluir).
 
 Para importar por link: em **Configurações → Links autorizados**, cadastre os domínios das fontes que você
 tem direito de usar (por exemplo, o armazenamento do seu site). Depois, na aba **Usar link**, informe o
 link **direto** do arquivo de vídeo e confirme a autorização.
-
-> A Etapa 6 trará o editor completo (legendas editáveis, ajuste manual do enquadramento) e o gerenciamento dos
-> vídeos exportados.
 
 ## Variáveis de ambiente (opcionais)
 
@@ -372,24 +400,27 @@ Exemplo no PowerShell: `$env:UNLOCK_DATA_DIR = "D:\UnlockClips\dados"` antes de 
 | POST | `/api/projects/{id}/clips/detect` | gerar ou refazer sugestões (`{"keep_curated": true}` mantém os curados) |
 | GET | `/api/projects/{id}/clips` | cortes com pontuação, critérios, motivos e avisos |
 | POST | `/api/projects/{id}/clips` | criar corte manual (`start`, `end`, `title`) |
-| PATCH/DELETE | `/api/projects/{id}/clips/{clip_id}` | editar título, status, início/fim (recalcula) ou excluir |
+| PATCH/DELETE | `/api/projects/{id}/clips/{clip_id}` | editar título, status, início/fim (recalcula), enquadramento (`framing_override`; `null` = padrão do projeto) ou excluir |
 | GET | `/api/clip-scoring/criteria` | critérios da pontuação, descrições e pesos padrão |
 | POST | `/api/projects/{id}/clips/render` | gerar MP4 (`{"clip_ids": [...]}`; vazio = todos os aprovados) |
-| GET | `/api/projects/{id}/clips/{clip_id}/subtitles` | blocos de legenda do corte (para a prévia) |
-| GET | `/api/projects/{id}/clips/{clip_id}/framing` | enquadramento calculado (central ou por rosto) |
+| GET | `/api/projects/{id}/clips/{clip_id}/subtitles` | blocos de legenda do corte (prévia e editor) |
+| PUT/DELETE | `/api/projects/{id}/clips/{clip_id}/subtitles` | salvar legendas editadas (`{"cues": [{start, end, text, hidden}]}`) / voltar às automáticas |
+| GET | `/api/projects/{id}/clips/{clip_id}/subtitles.srt` | legendas do corte em SRT (com as edições) |
+| GET | `/api/projects/{id}/clips/{clip_id}/framing` | enquadramento calculado (central, manual ou por rosto) |
 | GET | `/api/projects/{id}/clips/{clip_id}/frame.jpg?t=` | quadro exato do vídeo final em `t` segundos do corte |
 | GET | `/api/subtitle-templates` | modelos de legenda |
 | GET | `/api/projects/{id}/source` | vídeo original (com suporte a `Range`) |
 | GET | `/api/projects/{id}/audio` | áudio extraído (WAV mono 16 kHz, com suporte a `Range`) |
 | GET | `/api/projects/{id}/thumbnail` | miniatura JPEG |
-| GET | `/api/exports` | vídeos exportados |
+| GET | `/api/exports` | vídeos exportados (todos os projetos) |
+| GET/DELETE | `/api/projects/{id}/exports` | vídeos exportados do projeto / excluir todos |
+| GET/DELETE | `/api/projects/{id}/exports/{arquivo}` | baixar (`?download=false` exibe no navegador) / excluir um vídeo |
+| GET | `/api/projects/{id}/storage` · `/api/storage` | espaço em disco por projeto |
 
 Documentação interativa: http://127.0.0.1:8000/docs
 
 ## Próximos passos
 
-- **Etapa 6** — editor dos cortes (legendas editáveis, ajuste manual do enquadramento) e gerenciamento dos
-  vídeos exportados.
 - **Etapa 7** — testes finais, documentação e preparação para execução no Windows.
 - **Opcional** — refinamento das sugestões por IA generativa (por exemplo, para reescrever títulos ou
   reordenar candidatos). Não está incluído: exigiria um modelo local adicional ou uma API paga, que seria

@@ -5,7 +5,10 @@ import type {
   ClipFraming,
   ClipSubtitles,
   ClipUpdate,
+  ExportsDeleted,
+  ProjectStorage,
   ScoringCriterion,
+  SubtitleCueEdit,
   SubtitleTemplateInfo,
   ExportedVideo,
   HealthInfo,
@@ -106,12 +109,35 @@ export const api = {
     }),
   clipSubtitles: (id: string, clipId: string) =>
     request<ClipSubtitles>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/subtitles`),
+  saveClipSubtitles: (id: string, clipId: string, cues: SubtitleCueEdit[]) =>
+    request<ClipSubtitles>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/subtitles`, {
+      method: "PUT",
+      body: JSON.stringify({ cues }),
+    }),
+  resetClipSubtitles: (id: string, clipId: string) =>
+    request<ClipSubtitles>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/subtitles`, {
+      method: "DELETE",
+    }),
+  clipSrtUrl: (id: string, clipId: string) =>
+    `/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/subtitles.srt`,
   clipFraming: (id: string, clipId: string) =>
     request<ClipFraming>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/framing`),
-  clipFrameUrl: (id: string, clipId: string, seconds: number) =>
-    `/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/frame.jpg?t=${seconds.toFixed(2)}`,
+  /** `version` muda a URL quando o corte é editado, para o navegador buscar o quadro de novo. */
+  clipFrameUrl: (id: string, clipId: string, seconds: number, version?: string) =>
+    `/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}/frame.jpg?t=${seconds.toFixed(2)}${
+      version ? `&v=${encodeURIComponent(version)}` : ""
+    }`,
   exportUrl: (id: string, filename: string) =>
     `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`,
+  /** Mesmo arquivo, exibido no navegador em vez de baixado. */
+  exportPlayUrl: (id: string, filename: string) =>
+    `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}?download=false`,
+  deleteExport: (id: string, filename: string) =>
+    request<void>(`/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`, { method: "DELETE" }),
+  deleteProjectExports: (id: string) =>
+    request<ExportsDeleted>(`/api/projects/${encodeURIComponent(id)}/exports`, { method: "DELETE" }),
+  projectStorage: (id: string) => request<ProjectStorage>(`/api/projects/${encodeURIComponent(id)}/storage`),
+  storage: () => request<ProjectStorage[]>("/api/storage"),
   subtitleTemplates: () => request<SubtitleTemplateInfo[]>("/api/subtitle-templates"),
   deleteClip: (id: string, clipId: string) =>
     request<void>(`/api/projects/${encodeURIComponent(id)}/clips/${encodeURIComponent(clipId)}`, { method: "DELETE" }),

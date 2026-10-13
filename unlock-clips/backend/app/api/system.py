@@ -16,6 +16,7 @@ from ..schemas import (
     AppSettings,
     ExportedVideo,
     HealthInfo,
+    ProjectStorage,
     ScoringCriterion,
     SubtitleTemplateInfo,
     SystemStats,
@@ -91,3 +92,9 @@ def subtitle_templates() -> list[SubtitleTemplateInfo]:
 @router.get("/exports", response_model=list[ExportedVideo])
 def list_exports(service: Service) -> list[ExportedVideo]:
     return service.list_exports()
+
+
+@router.get("/storage", response_model=list[ProjectStorage])
+def storage(service: Service) -> list[ProjectStorage]:
+    """Espaço em disco usado por projeto (vídeo original, áudio, vídeos exportados)."""
+    return service.storage_all()

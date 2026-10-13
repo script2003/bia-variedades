@@ -51,7 +51,6 @@ from .media import (
 from .schemas import (
     ACTIVE_JOB_STATUSES,
     AppSettings,
-    ClipSettings,
     ExportedVideo,
     JobInfo,
     JobKind,
@@ -67,7 +66,11 @@ from .schemas import (
     ClipFraming,
     ClipSubtitles,
     ClipUpdate,
+    EditableCue,
+    ExportsDeleted,
+    ProjectStorage,
     RenderInfo,
+    SubtitleCueEdit,
     SubtitleCueOut,
     SubtitleTemplateInfo,
     SubtitleWordOut,
@@ -80,9 +83,9 @@ from .schemas import (
 )
 from .storage import ProjectNotFound, ProjectStore, SettingsStore, atomic_write_text, is_valid_project_id
 from .clips import ClipAnalyzer, detect_clips, partial_energy
-from .framing import OUTPUT_SIZES, center_plan, face_plan
-from .render import plan_subtitles, render_clip, render_frame
-from .subtitles import TEMPLATES
+from .framing import FramingPlan, center_plan, face_plan, manual_plan
+from .render import editable_cues, plan_subtitles, render_clip, render_frame, requested_framing, subtitle_layout, transcript_words
+from .subtitles import TEMPLATES, auto_text_cues, to_srt
 from .transcription import WhisperEngine
 
 logger = logging.getLogger(__name__)
@@ -206,18 +209,34 @@ class ProjectService:
     def clip_frame(self, project_id: str, clip_id: str, at: float) -> bytes:
         """Quadro JPEG do corte exatamente como ficará no vídeo final (formato + legenda)."""
         project, clip, transcript, tools, source = self._render_context(project_id, clip_id)
+        plan = None
+        if requested_framing(project.settings, clip.framing_override) == "rosto":
+            cached = self._framing_cache.get(self._framing_key(project, clip))
+            if cached is not None:
+                plan = FramingPlan(cached.mode, cached.crop_width, cached.crop_height, cached.x, cached.y, list(cached.keyframes))
         try:
-            return render_frame(tools, source, project.media, transcript, clip.start, clip.end, project.settings, at)
+            return render_frame(
+                tools, source, project.media, transcript, clip.start, clip.end, project.settings, at,
+                framing=clip.framing_override, subtitle_edits=clip.subtitle_cues, plan=plan,
+            )  # fmt: skip
         except JobError as exc:
             raise ServiceError(422, str(exc)) from exc
 
+    @staticmethod
+    def _framing_key(project: Project, clip: Clip) -> tuple:
+        override = clip.framing_override.model_dump_json() if clip.framing_override else None
+        aspect, mode = project.settings.aspect_ratio, project.settings.framing
+        return (project.id, project.source.sha256, round(clip.start, 3), round(clip.end, 3), aspect, mode, override)
+
     def clip_framing(self, project_id: str, clip_id: str) -> ClipFraming:
-        """Enquadramento do corte (por rosto ou central), com cache, para a prévia ao vivo."""
+        """Enquadramento do corte (rosto, central ou manual), com cache, para a prévia ao vivo."""
         project, clip, _transcript, tools, source = self._render_context(project_id, clip_id)
         assert project.media is not None and project.media.video is not None
         src_w, src_h = project.media.video.display_size
-        aspect, mode = project.settings.aspect_ratio, project.settings.framing
-        key = (project_id, project.source.sha256, round(clip.start, 3), round(clip.end, 3), aspect, mode)
+        aspect = project.settings.aspect_ratio
+        override = clip.framing_override
+        mode = requested_framing(project.settings, override)
+        key = self._framing_key(project, clip)
         cached = self._framing_cache.get(key)
         if cached is not None:
             return cached
@@ -227,10 +246,14 @@ class ProjectService:
                 plan = face_plan(ctx, tools, source, clip.start, clip.end - clip.start, src_w, src_h, aspect)
             except JobError as exc:
                 raise ServiceError(422, str(exc)) from exc
+        elif mode == "manual" and override is not None:
+            plan = manual_plan(src_w, src_h, aspect, override.x, override.y, override.zoom)
         else:
             plan = center_plan(src_w, src_h, aspect)
         framing = ClipFraming(
             mode=plan.mode,  # type: ignore[arg-type]
+            requested=mode,  # type: ignore[arg-type]
+            override=override,
             source_width=src_w,
             source_height=src_h,
             crop_width=plan.crop_w,
@@ -251,7 +274,9 @@ class ProjectService:
         if clip_set is None:
             raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
         clip = clip_set.clips[self._clip_index(clip_set, clip_id)]
-        plan = plan_subtitles(self.get_transcript(project_id), clip.start, clip.end, project.settings)
+        transcript = self.get_transcript(project_id)
+        plan = plan_subtitles(transcript, clip.start, clip.end, project.settings, clip.subtitle_cues)
+        editable = editable_cues(transcript, clip.start, clip.end, project.settings, clip.subtitle_cues)
         template = TEMPLATES[plan.template_key]
         return ClipSubtitles(
             width=plan.layout.width,
@@ -270,7 +295,60 @@ class ProjectService:
                 )
                 for cue in plan.cues
             ],
+            editable=[
+                EditableCue(start=round(c.start, 3), end=round(c.end, 3), text=c.text, hidden=c.hidden, edited=c.edited)
+                for c in editable
+            ],
+            edited=clip.subtitle_cues is not None,
         )
+
+    def clip_srt(self, project_id: str, clip_id: str) -> tuple[str, str]:
+        """Legendas do corte em SRT (com as edições), para publicar como legenda separada."""
+        project = self.get(project_id)
+        clip_set = self._load_clips(project)
+        if clip_set is None:
+            raise ServiceError(404, "Ainda não há cortes sugeridos para este projeto.")
+        clip = clip_set.clips[self._clip_index(clip_set, clip_id)]
+        transcript = self.get_transcript(project_id)
+        # SRT sem caixa-alta forçada: o texto fica como na transcrição/edição.
+        settings = project.settings.model_copy(update={"subtitle_style": "classico"})
+        plan = plan_subtitles(transcript, clip.start, clip.end, settings, clip.subtitle_cues)
+        name = self._render_filename(clip, project.settings.aspect_ratio).removesuffix(".mp4") + ".srt"
+        return to_srt(plan.cues), name
+
+    def set_clip_subtitles(self, project_id: str, clip_id: str, cues: list[SubtitleCueEdit]) -> ClipSubtitles:
+        """Salva as legendas editadas do corte. Lista vazia volta às legendas automáticas."""
+        with self._clips_lock:
+            project, clip_set, _analyzer, _audio = self._clip_editing_context(project_id, need_analyzer=False)
+            index = self._clip_index(clip_set, clip_id)
+            clip = clip_set.clips[index]
+            clip.subtitle_cues = self._validate_cues(project, clip, cues) if cues else None
+            clip.updated_at = utcnow()
+            self._save_clips(project_id, clip_set)
+        return self.clip_subtitles(project_id, clip_id)
+
+    def _validate_cues(self, project: Project, clip: Clip, cues: list[SubtitleCueEdit]) -> list[SubtitleCueEdit] | None:
+        ordered = sorted(cues, key=lambda c: c.start)
+        cleaned: list[SubtitleCueEdit] = []
+        for number, cue in enumerate(ordered, start=1):
+            start, end = max(cue.start, clip.start), min(cue.end, clip.end)
+            if end - start < 0.1:
+                raise ServiceError(
+                    422, f"A legenda {number} precisa durar pelo menos 0,1 s e ficar dentro do corte."
+                )
+            if cleaned and start < cleaned[-1].end - 0.001:
+                raise ServiceError(422, f"As legendas {number - 1} e {number} se sobrepõem. Ajuste os tempos.")
+            text = " ".join(cue.text.split())
+            cleaned.append(SubtitleCueEdit(start=round(start, 3), end=round(end, 3), text=text, hidden=cue.hidden or not text))
+        # Se nada mudou em relação às legendas automáticas, o corte continua no modo automático.
+        transcript = self.get_transcript(project.id)
+        words = transcript_words(transcript)
+        auto = auto_text_cues(words, clip.start, clip.end, subtitle_layout(project.settings).max_chars)
+        same = len(auto) == len(cleaned) and all(
+            abs(a.start - c.start) < 0.01 and abs(a.end - c.end) < 0.01 and not c.hidden and " ".join(a.text.split()) == c.text
+            for a, c in zip(auto, cleaned)
+        )
+        return None if same else cleaned
 
     def detect(self, project_id: str, keep_curated: bool = True) -> Project:
         """Gera (ou refaz) as sugestões de cortes a partir da transcrição."""
@@ -310,8 +388,11 @@ class ProjectService:
                 self._attach_energy(analyzer, audio, clip_set, updated)
                 updated.id, updated.created_at = clip.id, clip.created_at
                 updated.render = clip.render  # continua disponível, mas passa a constar como desatualizado
+                updated.framing_override, updated.subtitle_cues = clip.framing_override, clip.subtitle_cues
             else:
                 updated = clip.model_copy(update={"title": title, "status": status, "edited": clip.edited or data.title is not None})
+            if "framing_override" in data.model_fields_set:
+                updated.framing_override = data.framing_override
             updated.updated_at = utcnow()
             clip_set.clips[index] = updated
             self._save_clips(project_id, clip_set)
@@ -361,18 +442,21 @@ class ProjectService:
             exports_total=len(self.list_exports()),
         )
 
-    def list_exports(self) -> list[ExportedVideo]:
+    def list_exports(self, project_id: str | None = None) -> list[ExportedVideo]:
         exports: list[ExportedVideo] = []
-        for project in self.store.list():
+        projects = [self.get(project_id)] if project_id else self.store.list()
+        for project in projects:
             folder = self.store.exports_dir(project.id)
             if not folder.is_dir():
                 continue
             clip_set = self._load_clips(project)
-            titles = {c.render.filename: (c.id, c.title) for c in clip_set.clips if c.render} if clip_set else {}
+            by_file = {c.render.filename: c for c in clip_set.clips if c.render} if clip_set else {}
             for file in folder.iterdir():
-                if not file.is_file() or file.suffix.lower() != ".mp4":
+                if not file.is_file() or file.suffix.lower() != ".mp4" or ".part." in file.name:
                     continue
                 stat = file.stat()
+                clip = by_file.get(file.name)
+                render = clip.render if clip else None
                 exports.append(
                     ExportedVideo(
                         project_id=project.id,
@@ -381,8 +465,13 @@ class ProjectService:
                         size_bytes=stat.st_size,
                         created_at=_mtime(stat.st_mtime),
                         url=f"/api/projects/{project.id}/exports/{file.name}",
-                        clip_id=titles.get(file.name, (None, None))[0],
-                        clip_title=titles.get(file.name, (None, None))[1],
+                        clip_id=clip.id if clip else None,
+                        clip_title=clip.title if clip else None,
+                        aspect_ratio=render.aspect_ratio if render else None,
+                        width=render.width if render else None,
+                        height=render.height if render else None,
+                        duration_seconds=render.duration_seconds if render else None,
+                        stale=bool(clip and render and render.signature != self._render_signature(project, clip)),
                     )
                 )
         exports.sort(key=lambda e: e.created_at, reverse=True)
@@ -396,6 +485,82 @@ class ProjectService:
         if not path.is_file():
             raise ServiceError(404, "Arquivo exportado não encontrado.")
         return path
+
+    def delete_export(self, project_id: str, filename: str) -> None:
+        """Exclui um MP4 exportado; o corte continua no projeto e pode ser gerado de novo."""
+        path = self.export_path(project_id, filename)
+        self._delete_export_files(project_id, [path])
+
+    def delete_exports(self, project_id: str) -> ExportsDeleted:
+        """Exclui todos os MP4 exportados do projeto (libera espaço; os cortes são mantidos)."""
+        project = self.get(project_id)
+        if project.job is not None and self.jobs.is_active(project.job.id) and project.job.kind == "render_clips":
+            raise ServiceError(409, "Aguarde a geração dos vídeos terminar (ou cancele-a) antes de excluir os arquivos.")
+        folder = self.store.exports_dir(project_id)
+        files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == ".mp4"] if folder.is_dir() else []
+        freed = sum(f.stat().st_size for f in files)
+        self._delete_export_files(project_id, files)
+        return ExportsDeleted(deleted=len(files), freed_bytes=freed)
+
+    def _delete_export_files(self, project_id: str, files: list[Path]) -> None:
+        names = {f.name for f in files}
+        with self._clips_lock:
+            for file in files:
+                try:
+                    file.unlink(missing_ok=True)
+                except OSError as exc:
+                    raise ServiceError(
+                        409, f"Não foi possível excluir “{file.name}”. Feche o vídeo se ele estiver aberto em outro programa."
+                    ) from exc
+            project = self.get(project_id)
+            clip_set = self._load_clips(project)
+            if clip_set is not None and any(c.render and c.render.filename in names for c in clip_set.clips):
+                for clip in clip_set.clips:
+                    if clip.render is not None and clip.render.filename in names:
+                        clip.render = None
+                self._save_clips(project_id, clip_set)
+
+    def storage(self, project_id: str) -> ProjectStorage:
+        """Espaço em disco usado pelo projeto, por tipo de arquivo."""
+        project = self.get(project_id)
+        folder = self.store.project_dir(project_id)
+        exports_dir = self.store.exports_dir(project_id)
+        source = audio = exports = other = 0
+        exports_count = 0
+        for root, _dirs, files in os.walk(folder):
+            for name in files:
+                path = Path(root) / name
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                if path.parent == exports_dir:
+                    exports += size
+                    exports_count += path.suffix.lower() == ".mp4"
+                elif project.source.filename and path == folder / project.source.filename:
+                    source += size
+                elif project.audio and path == folder / project.audio.filename:
+                    audio += size
+                else:
+                    other += size
+        return ProjectStorage(
+            project_id=project_id,
+            source_bytes=source,
+            audio_bytes=audio,
+            exports_bytes=exports,
+            other_bytes=other,
+            total_bytes=source + audio + exports + other,
+            exports_count=exports_count,
+        )
+
+    def storage_all(self) -> list[ProjectStorage]:
+        result: list[ProjectStorage] = []
+        for project in self.store.list():
+            try:
+                result.append(self.storage(project.id))
+            except ServiceError:
+                continue
+        return result
 
     # ------------------------------------------------------------------ criação
 
@@ -841,6 +1006,11 @@ class ProjectService:
             "framing": settings.framing,
             "transcript": project.transcript.created_at.isoformat() if project.transcript else None,
         }
+        # Edições do editor entram na assinatura só quando existem (vídeos antigos continuam válidos).
+        if clip.framing_override is not None:
+            payload["framing_override"] = clip.framing_override.model_dump(mode="json")
+        if clip.subtitle_cues is not None:
+            payload["subtitle_cues"] = [c.model_dump(mode="json") for c in clip.subtitle_cues]
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
     def _pending_renders(self, project: Project) -> list[str]:
@@ -890,6 +1060,7 @@ class ProjectService:
                 ctx.progress(start, f"Corte {index + 1} de {total}: {clip.title[:40]}", force=True)
                 result = render_clip(
                     ctx, tools, source, project.media, transcript, clip.start, clip.end, settings, exports / filename,
+                    framing=clip.framing_override, subtitle_edits=clip.subtitle_cues,
                     progress_start=start, progress_end=(index + 1) / total,
                 )  # fmt: skip
                 info = RenderInfo(

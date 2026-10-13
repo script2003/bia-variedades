@@ -12,6 +12,7 @@ from app.framing import (
     crop_size,
     face_detection_status,
     face_plan,
+    manual_plan,
     simplify,
     smooth_track,
 )
@@ -125,3 +126,18 @@ def test_face_plan_falls_back_to_center_without_faces(tmp_path):
     assert plan.mode == "centro" and "enquadramento central" in plan.notes[0]
     vertical = face_plan(ctx(), find_tools(None), video, 0, 4, 360, 640, "9:16")
     assert vertical.mode == "centro" and vertical.notes == []  # já ocupa a largura toda
+
+
+def test_manual_plan_position_and_zoom():
+    left = manual_plan(1920, 1080, "9:16", 0.0, 0.5, 1.0)
+    assert (left.mode, left.crop_w, left.crop_h, left.x, left.y) == ("manual", 608, 1080, 0, 0)
+    right = manual_plan(1920, 1080, "9:16", 1.0, 0.5, 1.0)
+    assert right.x == 1920 - 608
+    zoomed = manual_plan(1920, 1080, "9:16", 0.5, 0.0, 2.0)
+    assert (zoomed.crop_w, zoomed.crop_h) == (304, 540) and zoomed.y == 0
+    assert zoomed.x == round((1920 - 304) * 0.5)
+    assert zoomed.filter() == "crop=w=304:h=540:x='808':y=0"
+    assert zoomed.notes and "desfocada" in zoomed.notes[0]  # 304 px ampliados para 1080 px
+    assert manual_plan(1920, 1080, "9:16", 0.5, 0.5, 1.2).notes == []
+    # Valores fora da faixa são limitados.
+    assert manual_plan(1920, 1080, "9:16", 2.0, -1.0, 9.0).x == 1920 - manual_plan(1920, 1080, "9:16", 0, 0, 3).crop_w

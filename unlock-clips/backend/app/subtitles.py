@@ -6,6 +6,9 @@
 * Duas linhas são equilibradas (comprimentos parecidos), como em legendas profissionais.
 * O destaque da palavra atual é feito com um evento ASS por palavra: o texto do bloco
   inteiro fica na tela e só a palavra falada muda de cor (e cresce levemente).
+* No editor, cada bloco pode ter o texto, os tempos e a visibilidade alterados. Os blocos
+  editados são guardados com tempos absolutos; trechos sem edição (por exemplo, quando o
+  corte é ampliado depois) continuam vindo da transcrição automaticamente.
 """
 
 from __future__ import annotations
@@ -220,6 +223,7 @@ def build_cues(
     uppercase: bool = False,
     max_lines: int = MAX_LINES,
     max_seconds: float = MAX_CUE_SECONDS,
+    keep_punctuation: bool = False,
 ) -> list[Cue]:
     """Gera os blocos de legenda (tempos relativos ao início do corte)."""
     duration = clip_end - clip_start
@@ -254,10 +258,127 @@ def build_cues(
     for k, group in enumerate(groups):
         for w in group:
             # Pontuação leve no fim das linhas polui a legenda; "?" e "!" são mantidos.
-            w.text = _TRAILING_SOFT.sub("", w.text) or w.text
+            if not keep_punctuation:
+                w.text = _TRAILING_SOFT.sub("", w.text) or w.text
         next_start = groups[k + 1][0].start if k + 1 < len(groups) else duration
         end = min(max(group[-1].end + HOLD_SECONDS, group[0].start + MIN_CUE_SECONDS), next_start, duration)
         cues.append(Cue(start=group[0].start, end=max(end, group[-1].end), lines=balance_lines(group, max_chars)))
+    return cues
+
+
+# ---------------------------------------------------------------------- edição
+
+
+MIN_EDIT_SECONDS = 0.1
+
+
+@dataclass
+class TextCue:
+    """Bloco de legenda como texto livre (tempos absolutos, em segundos do vídeo original)."""
+
+    start: float
+    end: float
+    text: str
+    hidden: bool = False
+    edited: bool = False
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
+def words_between(words: list[tuple[float, float, str]], start: float, end: float) -> list[tuple[float, float, str]]:
+    """Palavras cujo meio cai dentro de [start, end)."""
+    return [w for w in words if w[2].strip() and start <= (w[0] + w[1]) / 2 < end]
+
+
+def transcript_text(words: list[tuple[float, float, str]], start: float, end: float) -> str:
+    return _normalize(" ".join(w[2] for w in words_between(words, start, end)))
+
+
+def auto_text_cues(words: list[tuple[float, float, str]], start: float, end: float, max_chars: int) -> list[TextCue]:
+    """Blocos automáticos do trecho, com o texto original (com pontuação) para o editor."""
+    cues = build_cues(words, start, end, max_chars, keep_punctuation=True)
+    return [TextCue(start + c.start, start + c.end, " ".join(w.text for w in c.words)) for c in cues]
+
+
+def merge_edits(
+    words: list[tuple[float, float, str]], clip_start: float, clip_end: float, max_chars: int, edits: list[TextCue]
+) -> list[TextCue]:
+    """Blocos efetivos de um corte: os editados (limitados ao corte) + automáticos nos intervalos livres."""
+    kept: list[TextCue] = []
+    for edit in sorted(edits, key=lambda e: e.start):
+        start, end = max(edit.start, clip_start), min(edit.end, clip_end)
+        if kept:
+            start = max(start, kept[-1].end)
+        if end - start >= MIN_EDIT_SECONDS:
+            original = transcript_text(words, start, end)
+            changed = edit.hidden or _normalize(edit.text) != original
+            kept.append(TextCue(start, end, _normalize(edit.text), edit.hidden, changed))
+    result: list[TextCue] = []
+    cursor = clip_start
+    for edit in [*kept, None]:
+        gap_end = edit.start if edit is not None else clip_end
+        if gap_end - cursor >= MIN_EDIT_SECONDS:
+            result.extend(auto_text_cues(words, cursor, gap_end, max_chars))
+        if edit is not None:
+            result.append(edit)
+            cursor = max(cursor, edit.end)
+    return result
+
+
+def cues_from_text(
+    text_cues: list[TextCue],
+    words: list[tuple[float, float, str]],
+    clip_start: float,
+    clip_end: float,
+    max_chars: int,
+    *,
+    uppercase: bool = False,
+    max_lines: int = MAX_LINES,
+) -> list[Cue]:
+    """Converte blocos de texto em blocos de legenda (tempos relativos, linhas equilibradas).
+
+    O tempo de cada palavra vem da transcrição quando o número de palavras não mudou; caso
+    contrário, é distribuído proporcionalmente ao tamanho das palavras dentro do bloco.
+    Blocos longos demais para duas linhas são divididos respeitando o tempo do bloco.
+    """
+    duration = clip_end - clip_start
+    capacity = max_chars * max_lines
+    cues: list[Cue] = []
+    for text_cue in text_cues:
+        tokens = text_cue.text.split()
+        if text_cue.hidden or not tokens:
+            continue
+        start = min(max(text_cue.start - clip_start, 0.0), duration)
+        end = min(max(text_cue.end - clip_start, 0.0), duration)
+        if end - start < 0.05:
+            continue
+        original = [(a - clip_start, b - clip_start) for a, b, _t in words_between(words, text_cue.start, text_cue.end)]
+        if len(original) == len(tokens):
+            timings = [(min(max(a, start), end), min(max(b, start), end)) for a, b in original]
+        else:
+            first = min(max(original[0][0], start), end) if original else start
+            last = min(max(original[-1][1], start), end) if original else end
+            if last - first < 0.1 * len(tokens):
+                first, last = start, end
+            weights = [len(t) + 1 for t in tokens]
+            total = sum(weights)
+            timings, acc = [], 0
+            for weight in weights:
+                timings.append((first + (last - first) * acc / total, first + (last - first) * (acc + weight) / total))
+                acc += weight
+        cue_words: list[CueWord] = []
+        for token, (a, b) in zip(tokens, timings):
+            text = _display(token, uppercase)
+            if not text_cue.edited:
+                text = _TRAILING_SOFT.sub("", text) or text
+            cue_words.append(CueWord(a, max(b, a + 0.01), text))
+        groups = [cue_words] if _length(cue_words) <= capacity else _split_evenly(cue_words, capacity, float("inf"))
+        for k, group in enumerate(groups):
+            group_start = start if k == 0 else group[0].start
+            group_end = end if k == len(groups) - 1 else groups[k + 1][0].start
+            cues.append(Cue(group_start, max(group_end, group_start + 0.05), balance_lines(group, max_chars)))
     return cues
 
 

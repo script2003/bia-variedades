@@ -18,10 +18,14 @@ from ..schemas import (
     ClipSubtitles,
     ClipUpdate,
     DetectClipsRequest,
+    ExportedVideo,
+    ExportsDeleted,
     LinkImportRequest,
     Project,
+    ProjectStorage,
     ProjectUpdate,
     RenderRequest,
+    SubtitleEditRequest,
     Transcript,
 )
 from ..transcription import to_srt, to_text, to_vtt
@@ -186,9 +190,32 @@ def clip_subtitles(project_id: str, clip_id: str, service: Service) -> ClipSubti
     return service.clip_subtitles(project_id, clip_id)
 
 
+@router.put("/{project_id}/clips/{clip_id}/subtitles", response_model=ClipSubtitles)
+def save_clip_subtitles(project_id: str, clip_id: str, body: SubtitleEditRequest, service: Service) -> ClipSubtitles:
+    """Salva as legendas editadas (texto, tempos e visibilidade de cada bloco)."""
+    return service.set_clip_subtitles(project_id, clip_id, body.cues)
+
+
+@router.delete("/{project_id}/clips/{clip_id}/subtitles", response_model=ClipSubtitles)
+def reset_clip_subtitles(project_id: str, clip_id: str, service: Service) -> ClipSubtitles:
+    """Descarta as edições e volta às legendas geradas a partir da transcrição."""
+    return service.set_clip_subtitles(project_id, clip_id, [])
+
+
+@router.get("/{project_id}/clips/{clip_id}/subtitles.srt")
+def download_clip_srt(project_id: str, clip_id: str, service: Service) -> PlainTextResponse:
+    """Legendas do corte (com as edições) em SRT, tempos a partir do início do corte."""
+    content, filename = service.clip_srt(project_id, clip_id)
+    return PlainTextResponse(
+        content,
+        media_type="application/x-subrip; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{project_id}/clips/{clip_id}/framing", response_model=ClipFraming)
 async def clip_framing(project_id: str, clip_id: str, service: Service) -> ClipFraming:
-    """Posição do recorte ao longo do corte (acompanhamento de rosto), para a prévia ao vivo."""
+    """Recorte do corte (central, manual ou acompanhando o rosto), para a prévia ao vivo."""
     return await run_in_threadpool(service.clip_framing, project_id, clip_id)
 
 
@@ -207,7 +234,33 @@ def thumbnail(project_id: str, service: Service) -> FileResponse:
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
 
 
+@router.get("/{project_id}/storage", response_model=ProjectStorage)
+def project_storage(project_id: str, service: Service) -> ProjectStorage:
+    return service.storage(project_id)
+
+
+@router.get("/{project_id}/exports", response_model=list[ExportedVideo])
+def list_project_exports(project_id: str, service: Service) -> list[ExportedVideo]:
+    return service.list_exports(project_id)
+
+
+@router.delete("/{project_id}/exports", response_model=ExportsDeleted)
+def delete_project_exports(project_id: str, service: Service) -> ExportsDeleted:
+    """Exclui todos os MP4 do projeto para liberar espaço (os cortes e edições são mantidos)."""
+    return service.delete_exports(project_id)
+
+
 @router.get("/{project_id}/exports/{filename}")
-def download_export(project_id: str, filename: str, service: Service) -> FileResponse:
+def download_export(
+    project_id: str, filename: str, service: Service, download: Annotated[bool, Query()] = True
+) -> FileResponse:
+    """MP4 exportado. ``download=false`` exibe no navegador em vez de baixar."""
     path = service.export_path(project_id, filename)
-    return FileResponse(path, media_type="video/mp4", filename=filename)
+    disposition = "attachment" if download else "inline"
+    return FileResponse(path, media_type="video/mp4", filename=filename, content_disposition_type=disposition)
+
+
+@router.delete("/{project_id}/exports/{filename}", status_code=204)
+def delete_export(project_id: str, filename: str, service: Service) -> Response:
+    service.delete_export(project_id, filename)
+    return Response(status_code=204)
