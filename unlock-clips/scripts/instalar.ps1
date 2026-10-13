@@ -63,11 +63,16 @@ function Find-Python {
         if (-not (Test-Comando $c[0])) { continue }
         $argumentos = @($c | Select-Object -Skip 1) + @("-c", "import sys; print('%d.%d' % sys.version_info[:2])")
         # O "python" falso da Microsoft Store escreve no erro padrão: ignora-o sem interromper o script.
+        # (Sem "Select-Object -First": no PowerShell 5.1 ele interrompe o programa e altera o $LASTEXITCODE.)
         $anterior = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        try { $versao = (& $c[0] @argumentos 2>$null | Select-Object -First 1) } catch { $versao = $null } finally { $ErrorActionPreference = $anterior }
-        if ($LASTEXITCODE -ne 0 -or -not $versao) { continue }
-        $partes = $versao.Trim().Split(".")
+        $saida = @()
+        $codigo = 1
+        try { $saida = @(& $c[0] @argumentos 2>$null); $codigo = $LASTEXITCODE } catch { $codigo = 1 } finally { $ErrorActionPreference = $anterior }
+        if ($codigo -ne 0 -or $saida.Count -eq 0) { continue }
+        $versao = "$($saida[0])".Trim()
+        if ($versao -notmatch '^\d+\.\d+$') { continue }
+        $partes = $versao.Split(".")
         if ([int]$partes[0] -eq 3 -and [int]$partes[1] -ge 10 -and [int]$partes[1] -le 13) {
             return [pscustomobject]@{ Comando = $c[0]; Argumentos = @($c | Select-Object -Skip 1); Versao = $versao.Trim() }
         }
@@ -114,7 +119,7 @@ if (-not (Test-Comando "ffmpeg") -and $InstalarDependencias) {
     Install-ComWinget "Gyan.FFmpeg" "FFmpeg"
 }
 if (Test-Comando "ffmpeg") {
-    $linha = (ffmpeg -hide_banner -version | Select-Object -First 1)
+    $linha = @(ffmpeg -hide_banner -version)[0]
     Write-Ok $linha
 } else {
     Write-Aviso "FFmpeg não encontrado no PATH. Instale com: winget install -e --id Gyan.FFmpeg"

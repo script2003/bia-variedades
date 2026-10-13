@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Dados locais (projetos, vídeos enviados e exportações)
 backend/data/
