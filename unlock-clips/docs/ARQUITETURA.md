@@ -26,15 +26,27 @@ Navegador (React)  ──HTTP /api──▶  FastAPI (Python)  ──▶  Tarefa
 
 ## Estrutura de pastas
 
+O fluxo de integração contínua fica em `.github/workflows/unlock-clips.yml`, na raiz do repositório.
+
 ```
 unlock-clips/
-├── README.md
+├── README.md                     guia de instalação e uso
+├── Instalar UNLOCK CLIPS.bat     instalação com dois cliques (chama scripts\instalar.ps1)
+├── Iniciar UNLOCK CLIPS.bat      inicia o servidor e abre o navegador
+├── docs/                         HISTORICO.md (etapas) e ARQUITETURA.md (este arquivo)
+├── scripts/
+│   ├── instalar.ps1              verifica/instala Python, Node.js e FFmpeg, cria o .venv, compila a interface
+│   ├── iniciar.ps1               inicia (porta, pasta de dados, sem navegador)
+│   ├── testar.ps1                todos os testes
+│   ├── desenvolver.ps1           back-end com recarga + Vite
+│   └── teste_completo.py         teste de ponta a ponta com o servidor rodando
 ├── backend/
 │   ├── requirements.txt          dependências de execução
 │   ├── requirements-dev.txt      + pytest
 │   ├── pytest.ini
 │   ├── app/
-│   │   ├── __main__.py           `python -m app` inicia o servidor
+│   │   ├── __main__.py           `python -m app` inicia o servidor (--abrir, porta ocupada, versão do Python)
+│   │   ├── logs.py               log no terminal e em data/logs/unlock-clips.log (rotativo)
 │   │   ├── main.py               fábrica da aplicação FastAPI, CORS, erros, front-end compilado
 │   │   ├── config.py             caminhos e variáveis de ambiente
 │   │   ├── schemas.py            modelos Pydantic (projeto, tarefa, configurações)
@@ -53,7 +65,7 @@ unlock-clips/
 │   │   ├── services.py           regras de negócio dos projetos (inclui edição, exportados e espaço em disco)
 │   │   └── api/                  rotas HTTP (projetos e sistema)
 │   ├── tests/                    testes automatizados (pytest); tiny_whisper.py gera um modelo de teste
-│   └── data/                     criada na execução: projetos, modelos e settings.json (ignorada pelo git)
+│   └── data/                     criada na execução: projects/, models/, logs/, tmp/ e settings.json (ignorada pelo git)
 └── frontend/
     ├── package.json / package-lock.json
     ├── vite.config.ts            proxy /api → back-end e configuração do Vitest

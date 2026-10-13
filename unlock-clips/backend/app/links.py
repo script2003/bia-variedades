@@ -56,7 +56,7 @@ class DownloadError(JobError):
 
 
 def default_client_factory() -> httpx.Client:
-    return httpx.Client(timeout=DEFAULT_TIMEOUT, follow_redirects=False, headers={"User-Agent": "UNLOCK-CLIPS/0.6"})
+    return httpx.Client(timeout=DEFAULT_TIMEOUT, follow_redirects=False, headers={"User-Agent": "UNLOCK-CLIPS/1.0"})
 
 
 def host_is_allowed(host: str, allowed_domains: list[str]) -> bool:
