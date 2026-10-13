@@ -1,433 +1,257 @@
 # UNLOCK CLIPS
 
 Ferramenta local para transformar vídeos longos (podcasts, entrevistas, debates, aulas) em cortes curtos
-para TikTok, Instagram Reels e YouTube Shorts. Todo o processamento roda no seu computador, sem serviços
-pagos.
+para **TikTok, Instagram Reels e YouTube Shorts**. Tudo roda no seu computador, sem serviços pagos.
 
-- **Front-end:** React 19 + TypeScript + Tailwind CSS 4 (Vite)
-- **Back-end:** Python + FastAPI, tarefas em segundo plano com progresso e cancelamento
-- **Armazenamento:** arquivos locais (JSON + vídeos) em `backend/data/`
-- **Vídeo:** FFmpeg e FFprobe (leitura da mídia, extração de áudio, miniaturas)
-- **Transcrição:** faster-whisper com modelos locais (CPU ou GPU NVIDIA), sem serviços pagos
-- **Detecção de cortes:** regras explicáveis sobre a transcrição e o volume da voz, 100% local
+**O que ela faz**
 
-## Situação do desenvolvimento
+1. Recebe o vídeo (arquivo ou link direto de uma fonte que você autorizou) e verifica o arquivo.
+2. Extrai o áudio com o FFmpeg e **transcreve** com o faster-whisper (modelos locais), com o tempo de cada palavra.
+3. **Sugere os melhores trechos** com uma pontuação heurística explicável (gancho, pergunta e resposta, história,
+   opinião, clareza…) — a pontuação compara trechos do mesmo vídeo e **não prevê visualizações**.
+4. No **editor** você ajusta título, início e fim, **legendas** (texto, tempos, ocultar) e **enquadramento**
+   (central, acompanhando o rosto ou posição fixa com zoom), com prévia no formato final.
+5. **Exporta MP4** (H.264 + AAC) em 9:16, 1:1 ou 16:9 com as legendas incorporadas e a palavra falada em destaque.
+
+Tecnologias: React 19 + TypeScript + Tailwind CSS (interface) · Python + FastAPI (servidor e tarefas em segundo
+plano) · FFmpeg · faster-whisper · OpenCV/YuNet (rostos) · armazenamento em arquivos locais.
 
 | Etapa | Conteúdo | Situação |
 |------:|----------|----------|
-| 1 | Estrutura, interface e envio de vídeos | ✅ Concluída |
-| 2 | Integração com FFmpeg e extração de áudio | ✅ Concluída |
-| 3 | Transcrição com timestamps (faster-whisper) | ✅ Concluída |
-| 4 | Identificação e seleção de cortes | ✅ Concluída |
-| 5 | Legendas e conversão para formatos verticais | ✅ Concluída |
-| 6 | Editor, exportação MP4 e gerenciamento | ✅ Concluída |
-| 7 | Testes, documentação e preparação para Windows | Pendente |
+| 1 | Estrutura, interface e envio de vídeos | ✅ |
+| 2 | Integração com FFmpeg e extração de áudio | ✅ |
+| 3 | Transcrição com timestamps (faster-whisper) | ✅ |
+| 4 | Identificação e seleção de cortes | ✅ |
+| 5 | Legendas e conversão para formatos verticais | ✅ |
+| 6 | Editor, exportação MP4 e gerenciamento | ✅ |
+| 7 | Testes, documentação e preparação para Windows | ✅ |
 
-### O que a Etapa 1 entregou
+Detalhes de cada etapa: [docs/HISTORICO.md](docs/HISTORICO.md) · Arquitetura, pastas e API:
+[docs/ARQUITETURA.md](docs/ARQUITETURA.md)
 
-- Interface escura em português com menu: Painel, Criar cortes, Meus projetos, Vídeos exportados e Configurações.
-- **Envio de vídeo** (arrastar e soltar ou escolher arquivo) com barra de progresso real e botão para cancelar.
-  O arquivo é enviado e gravado em disco em blocos — nunca é carregado inteiro na memória.
-- **Validação** da extensão (`.mp4 .m4v .mov .mkv .webm .avi`), do tamanho máximo e da assinatura binária do
-  contêiner (um arquivo renomeado para `.mp4` que não é vídeo é recusado).
-- **Verificação em segundo plano**: releitura do arquivo com cálculo de SHA-256, progresso real, cancelamento
-  e aviso de vídeos duplicados.
-- **Importação por link** restrita a domínios que você autoriza em Configurações, com confirmação de direitos
-  de uso. Cada redirecionamento é revalidado. Páginas HTML, playlists de streaming (HLS/DASH) e conteúdo
-  com DRM são recusados — a ferramenta não contorna proteções de nenhum tipo.
-- **Projetos persistentes**: ficam salvos em disco e continuam disponíveis depois de fechar a aplicação.
-  Tarefas interrompidas por um encerramento aparecem como "Interrompido" com o botão **Tentar novamente**.
-- Página do projeto com player (com suporte a busca no vídeo via requisições `Range`), título editável,
-  configurações de corte editáveis, detalhes do arquivo e etapas do fluxo.
-- Configurações persistentes: padrões dos cortes (duração 15–30/30–60/60–90 s, formato 9:16/1:1/16:9,
-  idioma, estilo, tamanho e posição das legendas, destaque da palavra, enquadramento central/rosto,
-  quantidade máxima de cortes), domínios autorizados e tamanho máximo do arquivo.
+---
 
-### O que a Etapa 2 acrescentou
+## 1. Requisitos
 
-- **Processamento automático** após o envio (ou o download do link), em uma única tarefa em segundo plano:
-  1. verificação do arquivo (assinatura + SHA-256);
-  2. **leitura da mídia com FFprobe**: duração, resolução, orientação (inclusive rotação de vídeos de
-     celular), fps, codecs, taxa de bits e trilhas de áudio (idioma e trilha padrão);
-  3. **miniatura** JPEG exibida na lista de projetos e como capa do player;
-  4. **extração do áudio com FFmpeg** para `audio.wav` — PCM 16 bits, mono, 16 kHz, o formato usado pelo
-     faster-whisper na Etapa 3. Quando há várias trilhas, é usada a trilha marcada como padrão.
-- **Progresso real** da extração, calculado a partir do tempo já processado pelo FFmpeg (`-progress`).
-- **Cancelamento imediato**: o processo do FFmpeg é encerrado e o arquivo parcial é apagado.
-- **Erros claros**: FFmpeg ausente (com o comando de instalação), arquivo ilegível, vídeo sem trilha de áudio
-  ou sem trilha de vídeo. Depois de corrigir o problema, use **Tentar novamente**.
-- **Pasta do FFmpeg configurável** em Configurações (para quem não quer mexer no PATH), com diagnóstico da
-  versão e dos caminhos encontrados.
-- Página do projeto com as informações da mídia e um **player do áudio extraído**.
-- Projetos criados na Etapa 1 continuam funcionando: eles mostram o botão **Extrair áudio**.
+| Item | Mínimo | Recomendado |
+|------|--------|-------------|
+| Sistema | Windows 10 ou 11, 64 bits | — (também funciona em Linux e macOS) |
+| Memória | 8 GB | 16 GB para vídeos longos e modelos maiores |
+| Disco | 5 GB livres | 20 GB+ (vídeo original, áudio ≈115 MB/hora, MP4 gerados, modelos) |
+| Python | 3.10 a 3.13 | **3.12** |
+| Node.js | 20.19 | **22 LTS** |
+| FFmpeg | 4.4 com libx264 e libass | versão do `winget install Gyan.FFmpeg` |
+| GPU | opcional | NVIDIA com CUDA 12 acelera a transcrição |
 
-> Espaço em disco: o WAV ocupa cerca de **115 MB por hora** de vídeo (é removido junto com o projeto).
+Internet só é necessária para instalar e, na primeira transcrição, baixar o modelo Whisper escolhido
+(de 75 MB a 3 GB; o padrão *small* tem 484 MB). Depois tudo funciona offline.
 
-### O que a Etapa 3 acrescentou
+## 2. Instalação no Windows
 
-- **Transcrição local com faster-whisper**, iniciada automaticamente depois da extração do áudio (pode ser
-  desligada) ou pelo botão **Transcrever agora** / **Transcrever novamente**.
-- **Timestamps por trecho e por palavra**, salvos em `transcript.json` — base para a detecção de cortes
-  (Etapa 4) e para as legendas com destaque da palavra atual (Etapa 5).
-- O idioma usado é o **idioma das legendas** do projeto (ex.: `pt-BR` → português).
-- **Vídeos longos sem estourar a memória**: o áudio é lido do disco em blocos de ~10 minutos, cortados no
-  trecho mais silencioso perto do limite (para não partir palavras), e o fim de cada bloco é passado como
-  contexto ao próximo.
-- **Progresso real** (minutos já transcritos / duração) e **cancelamento** verificado a cada trecho.
-  Se a transcrição falhar ou for cancelada, **Tentar novamente** refaz só a transcrição.
-- **Filtro de voz (VAD)** opcional, que ignora trechos sem fala, acelera o processo e evita textos inventados
-  no silêncio. Os tempos continuam alinhados ao vídeo original.
-- **Modelos**: tiny, base, small (padrão, recomendado para CPU), medium, large-v3-turbo e large-v3. O modelo
-  é baixado uma única vez para `backend\data\models` e depois funciona offline; também é possível apontar
-  uma pasta com um modelo baixado manualmente.
-- **CPU ou GPU NVIDIA (CUDA)**, precisão numérica e *beam size* configuráveis.
-- Painel de transcrição no projeto: busca (ignora acentos), clique no trecho para pular o vídeo até ele,
-  destaque do trecho que está sendo falado e download em **SRT**, **VTT** e **TXT**.
+### Jeito mais fácil (dois cliques)
 
-Tempo de processamento (estimativa para CPU moderna, modelo *small*, int8): aproximadamente de 0,3× a 1× a
-duração do áudio. Modelos maiores são mais precisos e mais lentos; com GPU NVIDIA ficam muitas vezes mais rápidos.
+1. Baixe ou clone o projeto (por exemplo em `C:\UNLOCK-CLIPS`).
+2. Abra a pasta `unlock-clips` e dê dois cliques em **`Instalar UNLOCK CLIPS.bat`**.
+   O instalador verifica Python, Node.js e FFmpeg — e instala pelo **winget** o que estiver faltando —, prepara o
+   servidor, compila a interface e cria o atalho **UNLOCK CLIPS** na Área de Trabalho.
+3. Se ele instalou Python, Node.js ou FFmpeg agora e depois parou com um aviso, **feche a janela e execute o
+   instalador mais uma vez** (alguns programas só são reconhecidos em janelas novas).
 
-### O que a Etapa 4 acrescentou
-
-- **Sugestão automática de cortes** depois da transcrição (pode ser desligada) ou pelo botão
-  **Sugerir cortes** / **Gerar novamente**, respeitando a **duração** (15–30, 30–60 ou 60–90 s) e a
-  **quantidade máxima** definidas no projeto.
-- Como funciona:
-  1. as palavras com tempo viram **frases** (pontuação, pausas e limites de segmento do Whisper);
-  2. **mudanças de assunto** são detectadas pela queda de semelhança de vocabulário entre trechos e por
-     expressões como "mudando de assunto";
-  3. todo trecho que começa e termina em frase e cabe na duração escolhida é avaliado (um vídeo de 80 min
-     é analisado em cerca de 1 s);
-  4. os melhores são escolhidos sem sobreposição relevante e sem repetir a frase de abertura; trechos com
-     pontuação muito baixa em relação ao melhor do vídeo não são sugeridos (uma nota informa quantos).
-- **Pontuação heurística explicável (0–100)**, somando critérios com pesos ajustáveis em Configurações:
-
-  | Critério | O que observa |
-  |----------|---------------|
-  | Gancho inicial | pergunta, frase forte, número, história ou fala direta ao público nos primeiros segundos |
-  | Frases de impacto | expressões fortes e superlativos ("o maior erro", "ninguém fala", "nunca"…) |
-  | Opinião e debate | "na minha opinião", "eu discordo", contrastes ("mas", "por outro lado") |
-  | Pergunta e resposta | começa com pergunta e traz a resposta dentro do corte |
-  | História completa | marcas de início ("uma vez"), desenvolvimento ("então", "decidi") e conclusão ("no final", "aprendi") |
-  | Clareza da fala | confiança da transcrição, ritmo, vícios de linguagem ("né", "tipo") e pausas longas |
-  | Contexto completo | frases inteiras, sem começar com "mas"/"e"/"isso", sem terminar em pergunta sem resposta e sem atravessar mudança de assunto |
-  | Ênfase na voz | volume da fala acima da média do próprio vídeo |
-  | Duração | proximidade do meio da faixa escolhida |
-
-  Cada corte mostra os **motivos** (✓), os **avisos** (⚠) e, em "Por que esta pontuação?", a contribuição
-  de cada critério. **A pontuação compara trechos do mesmo vídeo; ela não prevê visualizações.**
-- **Ajuste manual**: pré-visualizar (o vídeo toca só o trecho e pausa no fim), aprovar, descartar, restaurar,
-  editar título, ajustar início e fim (±0,5 s ou "usar tempo atual do vídeo"; os limites são ajustados para
-  não cortar palavras e a pontuação é recalculada), adicionar corte manual e excluir.
-- **Gerar novamente** mantém cortes aprovados, descartados, ajustados e manuais; descartados não voltam a ser
-  sugeridos.
-- Expressões em **português**, **inglês** e **espanhol** (outros idiomas usam a lista em português e recebem
-  um aviso).
-
-> Refinamento por IA generativa (LLM) não foi incluído para manter tudo gratuito e local. A arquitetura
-> permite acrescentá-lo como etapa opcional (ver "Próximos passos").
-
-### O que a Etapa 5 acrescentou
-
-- **Geração do vídeo final** de cada corte (botão **Gerar vídeo**) ou de todos os aprovados de uma vez, em
-  segundo plano, com progresso real e cancelamento. Um único comando FFmpeg corta o trecho, enquadra, redimensiona,
-  incorpora as legendas e codifica em **MP4 H.264 + AAC** (compatível com TikTok, Reels e Shorts):
-  - **9:16** → 1080×1920 · **1:1** → 1080×1080 · **16:9** → 1920×1080.
-- **Legendas sincronizadas** a partir dos tempos de cada palavra:
-  - blocos de no máximo **2 linhas** que cabem na largura útil, divididos de forma equilibrada (sem palavras
-    soltas), encerrados no fim de frases, em pausas e após ~4 s;
-  - **destaque da palavra falada** (opcional), com cor própria e leve aumento;
-  - **4 modelos**: Destaque (caixa-alta, contorno grosso, verde-limão), Clássico, Caixa (faixa escura) e
-    Minimalista; tamanho e posição (inferior, centro, superior) configuráveis — no 9:16, "inferior" fica a 20% da
-    borda para não ficar sob os botões das redes sociais;
-  - em português (ou no idioma do projeto) e **embutidas no vídeo** (libass).
-- **Enquadramento**:
-  - **Central**: recorte fixo no centro;
-  - **Acompanhar rosto**: detecção com o modelo **YuNet** (OpenCV, incluído em `app/assets`, funciona offline),
-    2 amostras por segundo, filtro contra detecções isoladas e "câmera virtual" com zona morta — só se move quando
-    o rosto sai do centro, sem tremer. Sem rosto na maior parte do trecho, usa o enquadramento central e avisa.
-- **Prévia no formato** (antes de gerar): no navegador, com o mesmo recorte (inclusive o acompanhamento do rosto) e
-  a legenda sincronizada; e a aba **Quadro final (exato)**, que gera com o FFmpeg a imagem idêntica à do vídeo final.
-- Cada corte mostra **Vídeo pronto** / **Vídeo desatualizado** (quando o corte ou a configuração mudou depois da
-  geração), **Assistir** e **Baixar MP4**. Os arquivos também aparecem em **Vídeos exportados**.
-
-> O detector de rostos YuNet é distribuído sob licença MIT (`app/assets/face_detection_yunet_LICENSE.txt`).
-
-### O que a Etapa 6 acrescentou
-
-- **Editor de cada corte** (botão **Abrir no editor** no painel de cortes; endereço `/projetos/<id>/cortes/<corte>`):
-  - **pré-visualização** ao vivo no formato final (recorte + legenda), **quadro exato** gerado pelo FFmpeg e o
-    **vídeo gerado**;
-  - **título** editável, **aprovar / descartar** e navegação para o corte anterior/próximo;
-  - **início e fim** com ajuste fino (±0,5 s) e "usar tempo atual" — a pontuação e as legendas são recalculadas;
-  - **legendas editáveis**: corrigir o texto de cada bloco, ocultar blocos, ajustar os tempos (validados: dentro
-    do corte e sem sobreposição), ouvir o trecho de cada bloco, voltar às legendas automáticas e baixar o `.srt`.
-    A prévia reage enquanto você digita; o vídeo usa o texto editado com o modelo de legenda do projeto (caixa-alta,
-    cores, destaque da palavra, quebra em até 2 linhas). Se o número de palavras do bloco não mudar, o destaque
-    segue o tempo real de cada palavra; se mudar, o tempo é distribuído pelo tamanho das palavras;
-  - **ajuste de enquadramento** por corte: padrão do projeto, central, acompanhar rosto ou **posição fixa (manual)**
-    com posição horizontal, vertical e **zoom até 3×**, visto na hora na prévia (aviso quando o zoom deixa a imagem
-    desfocada);
-  - **Exportar MP4** / **Gerar novamente** (salva antes as alterações pendentes) com progresso real e cancelamento,
-    e **Baixar MP4**. O vídeo fica "desatualizado" sempre que o trecho, as legendas, o enquadramento ou a
-    configuração mudam depois da geração.
-- As edições ficam salvas no projeto (`clips.json`) e são mantidas ao **gerar novas sugestões** (cortes curados) e ao
-  mudar o trecho (blocos editados fora do novo trecho são descartados; trechos novos recebem legendas automáticas).
-- **Vídeos exportados**: busca, filtro por projeto, formato, duração, aviso de desatualizado, **assistir** no
-  navegador, **baixar**, **abrir no editor**, **excluir** um vídeo ou todos de um projeto (os cortes continuam salvos
-  e podem ser exportados de novo) e a pasta onde os arquivos ficam no computador.
-- **Meus projetos**: espaço em disco de cada projeto e total, ordenação (recentes, antigos, nome, espaço),
-  contagem de cortes/aprovados/vídeos e exclusão direto na lista. Na página do projeto, o quadro **Espaço em disco**
-  detalha vídeo original, áudio, vídeos exportados e permite excluir os vídeos exportados para liberar espaço.
-- Todas as etapas do fluxo agora são reais na tela do projeto, inclusive **Revisão e edição** e **Legendas, formato
-  e MP4** — nada é simulado como concluído.
-
-## Estrutura de pastas
-
-```
-unlock-clips/
-├── README.md
-├── backend/
-│   ├── requirements.txt          dependências de execução
-│   ├── requirements-dev.txt      + pytest
-│   ├── pytest.ini
-│   ├── app/
-│   │   ├── __main__.py           `python -m app` inicia o servidor
-│   │   ├── main.py               fábrica da aplicação FastAPI, CORS, erros, front-end compilado
-│   │   ├── config.py             caminhos e variáveis de ambiente
-│   │   ├── schemas.py            modelos Pydantic (projeto, tarefa, configurações)
-│   │   ├── storage.py            persistência em JSON com gravação atômica
-│   │   ├── jobs.py               fila de tarefas, progresso, cancelamento, subprocessos
-│   │   ├── media.py              validação de arquivos de vídeo e SHA-256
-│   │   ├── ffmpeg.py             FFprobe, FFmpeg com progresso/cancelamento, áudio e miniatura
-│   │   ├── transcription.py      faster-whisper: blocos, progresso, modelos, SRT/VTT/TXT
-│   │   ├── clips.py              detecção e pontuação explicável dos cortes
-│   │   ├── clip_lexicon.py       expressões usadas pelos critérios (pt, en, es)
-│   │   ├── subtitles.py          blocos de legenda, modelos visuais e arquivo ASS
-│   │   ├── framing.py            recorte 9:16/1:1/16:9 e acompanhamento de rosto (YuNet)
-│   │   ├── render.py             geração do MP4 final e do quadro de prévia
-│   │   ├── assets/               modelo de detecção de rostos (YuNet, MIT)
-│   │   ├── links.py              política de links autorizados e download
-│   │   ├── services.py           regras de negócio dos projetos (inclui edição, exportados e espaço em disco)
-│   │   └── api/                  rotas HTTP (projetos e sistema)
-│   ├── tests/                    testes automatizados (pytest); tiny_whisper.py gera um modelo de teste
-│   └── data/                     criada na execução: projetos, modelos e settings.json (ignorada pelo git)
-└── frontend/
-    ├── package.json / package-lock.json
-    ├── vite.config.ts            proxy /api → back-end e configuração do Vitest
-    ├── index.html
-    └── src/
-        ├── api/                  cliente HTTP, tipos e envio com progresso
-        ├── components/           layout, menu, painel de envio, formulários, progresso, prévia (LivePlayer)…
-        │   └── editor/           edição de legendas e de enquadramento
-        ├── hooks/usePolling.ts   atualização periódica (rápida com tarefas ativas)
-        ├── lib/                  formatação, validações, opções, cálculo do recorte e das legendas da prévia
-        ├── pages/                Painel, Criar cortes, Projetos, Projeto, Editor do corte, Exportados, Configurações
-        └── test/                 utilitários de teste
-```
-
-Cada projeto fica em `backend/data/projects/<id>/` com `project.json`, o vídeo original (`source.<ext>`),
-o áudio extraído (`audio.wav`), a miniatura (`thumbnail.jpg`), a transcrição (`transcript.json`), os cortes
-(`clips.json`) e a pasta `exports/` com os MP4 gerados. Os modelos de transcrição ficam em `backend/data/models/<modelo>/`.
-
-## Dependências
-
-| Ferramenta | Versão | Observação |
-|------------|--------|------------|
-| Python | 3.10 ou superior (testado com 3.13) | back-end |
-| Node.js | 20.19+ ou 22 LTS | front-end (exigência do Vite 7) |
-| FFmpeg + FFprobe | 4.4 ou superior (testado com 6.1) | **obrigatório** a partir da Etapa 2 |
-
-| Modelo Whisper | baixado automaticamente | de 75 MB (tiny) a 3 GB (large-v3); padrão *small* = 484 MB |
-
-Pacotes Python: `fastapi`, `uvicorn[standard]`, `httpx`, `faster-whisper` (traz `ctranslate2`,
-`onnxruntime`, `tokenizers` e `huggingface_hub`), `opencv-python-headless` (detecção de rostos) e `pytest`
-para testes. O FFmpeg precisa ter **libx264** e **libass** (as versões do `winget install Gyan.FFmpeg` têm).
-Pacotes npm: `react`, `react-dom`, `react-router-dom`, `lucide-react`; para desenvolvimento `vite`,
-`typescript`, `tailwindcss`, `@tailwindcss/vite`, `vitest`, `jsdom` e Testing Library.
-
-Nenhuma função depende de API paga.
-
-## Instalação no Windows (PowerShell)
-
-Instale os pré-requisitos (uma vez). Feche e reabra o PowerShell depois:
+### Pelo PowerShell
 
 ```powershell
-winget install -e --id Python.Python.3.13
+cd C:\UNLOCK-CLIPS\unlock-clips
+powershell -ExecutionPolicy Bypass -File .\scripts\instalar.ps1 -InstalarDependencias -CriarAtalho
+```
+
+Opções do `instalar.ps1`: `-InstalarDependencias` (instala o que faltar pelo winget), `-CriarAtalho`
+(atalho na Área de Trabalho) e `-Dev` (inclui as ferramentas de teste). Pode ser executado de novo a qualquer
+momento — por exemplo, depois de atualizar o código.
+
+### Instalação manual (passo a passo)
+
+```powershell
+# Pré-requisitos (uma vez). Feche e reabra o PowerShell depois.
+winget install -e --id Python.Python.3.12
 winget install -e --id OpenJS.NodeJS.LTS
 winget install -e --id Gyan.FFmpeg
-```
 
-Confira se o FFmpeg está no PATH (em um PowerShell novo):
+# Conferir (em um PowerShell novo)
+py -3.12 --version; node --version; ffmpeg -version
 
-```powershell
-ffmpeg -version
-ffprobe -version
-```
-
-Se preferir não usar o PATH, baixe o FFmpeg, descompacte (por exemplo em `C:\ffmpeg`) e informe a pasta
-`C:\ffmpeg\bin` em **Configurações → FFmpeg**.
-
-Na pasta onde o repositório foi clonado:
-
-```powershell
 # Back-end
-cd unlock-clips\backend
-py -m venv .venv
+cd C:\UNLOCK-CLIPS\unlock-clips\backend
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# Front-end
+# Interface
 cd ..\frontend
 npm ci
-```
-
-> Os comandos chamam `.\.venv\Scripts\python.exe` diretamente para não depender de `Activate.ps1`,
-> que costuma ser bloqueado pela política de execução do PowerShell.
-
-## Executar
-
-### Modo desenvolvimento (dois terminais)
-
-Terminal 1 — back-end em http://127.0.0.1:8000:
-
-```powershell
-cd unlock-clips\backend
-.\.venv\Scripts\python.exe -m app --reload
-```
-
-Terminal 2 — front-end em http://localhost:5173 (encaminha `/api` para o back-end):
-
-```powershell
-cd unlock-clips\frontend
-npm run dev
-```
-
-Abra **http://localhost:5173** no navegador.
-
-### Modo aplicação (um único servidor)
-
-```powershell
-cd unlock-clips\frontend
 npm run build
-cd ..\backend
-.\.venv\Scripts\python.exe -m app
 ```
 
-Abra **http://127.0.0.1:8000**. O back-end serve a interface compilada de `frontend\dist`.
+> Os comandos chamam `.\.venv\Scripts\python.exe` diretamente para não depender de `Activate.ps1`, que costuma
+> ser bloqueado pela política de execução do PowerShell.
 
-## Testes
+Sem permissão para usar o winget? Baixe o FFmpeg em https://www.gyan.dev/ffmpeg/builds/ (versão *full* ou
+*essentials*), descompacte (ex.: `C:\ffmpeg`) e informe `C:\ffmpeg\bin` em **Configurações → FFmpeg**.
+
+## 3. Iniciar
+
+- Dê dois cliques no atalho **UNLOCK CLIPS** (ou em `Iniciar UNLOCK CLIPS.bat`). O navegador abre em
+  **http://127.0.0.1:8000**. Para encerrar, feche a janela preta (ou pressione Ctrl+C nela).
+- Pelo PowerShell:
 
 ```powershell
-cd unlock-clips\backend
-.\.venv\Scripts\python.exe -m pytest
-
-cd ..\frontend
-npm test              # testes da interface (Vitest)
-npm run typecheck     # verificação de tipos TypeScript
-npm run build         # compilação de produção
+cd C:\UNLOCK-CLIPS\unlock-clips
+powershell -ExecutionPolicy Bypass -File .\scripts\iniciar.ps1
+# opções: -Porta 8010  -SemNavegador  -PastaDeDados D:\UnlockClips\dados
 ```
 
-Os testes do back-end geram pequenos vídeos reais com o FFmpeg para testar leitura da mídia, extração de
-áudio, miniaturas e cancelamento do processo. Se o FFmpeg não estiver no PATH, esses testes são pulados
-(e aparecem como `skipped` no resultado).
+- Diretamente com o Python (o que os scripts fazem por baixo):
 
-Para testar a transcrição sem internet, `tests/tiny_whisper.py` monta um modelo Whisper minúsculo com
-pesos aleatórios. Ele executa o faster-whisper de verdade (carregamento, decodificação, timestamps por palavra,
-VAD), mas produz **texto aleatório**: a qualidade da transcrição só pode ser avaliada com um modelo real.
+```powershell
+cd C:\UNLOCK-CLIPS\unlock-clips\backend
+.\.venv\Scripts\python.exe -m app --abrir          # outras opções: --port 8010, --host, --reload, --log-requisicoes
+```
 
-## Modelos de transcrição
+Se o UNLOCK CLIPS já estiver aberto, um segundo início apenas abre o navegador. Se a porta estiver ocupada por
+outro programa, a mensagem sugere outra porta.
 
-Na primeira transcrição o modelo escolhido em **Configurações → Transcrição** é baixado do Hugging Face
-para `backend\data\models\<modelo>`. Sem internet (ou com a rede bloqueando o Hugging Face), baixe os
-arquivos `config.json`, `model.bin`, `tokenizer.json`, `vocabulary.*` e `preprocessor_config.json` de
-`https://huggingface.co/Systran/faster-whisper-small` (ou do modelo desejado), coloque-os em uma pasta e
-informe essa pasta em **Pasta de um modelo próprio**.
+### Modo desenvolvimento (interface com recarga automática)
 
-GPU NVIDIA no Windows: selecione **GPU NVIDIA (CUDA)** em Configurações. É preciso ter drivers atualizados e
-as bibliotecas cuBLAS e cuDNN para CUDA 12 instaladas (consulte a documentação do faster-whisper). Em caso de
-erro ao carregar o modelo, volte para **CPU**.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\desenvolver.ps1
+```
 
-## Primeiro uso
+Abre o back-end com `--reload` em outra janela e a interface Vite em **http://localhost:5173** (que encaminha
+`/api` para a porta 8000). Equivalente manual, em dois terminais:
 
-1. Abra o **Painel** (ou **Criar cortes**, para escolher as configurações do projeto).
-2. Arraste um vídeo ou clique em **Escolher arquivo**, informe um título opcional e clique em **Analisar vídeo**.
-3. Acompanhe o envio; em seguida, a página do projeto mostra o processamento em segundo plano
-   (verificação → leitura da mídia → extração de áudio → transcrição) com a porcentagem real. Use
-   **Cancelar** para interromper a tarefa. Na primeira transcrição o modelo é baixado (484 MB no padrão).
-4. Quando o status ficar **Pronto**, revise os **Cortes sugeridos**: pré-visualize, veja por que cada trecho
-   foi escolhido, ajuste início e fim, aprove ou descarte. A transcrição pode ser lida, pesquisada e baixada
-   (SRT/VTT/TXT). Se mudar a duração ou a quantidade de cortes do projeto, clique em **Gerar novamente**.
-5. Escolha formato, estilo, tamanho e posição da legenda e o enquadramento em **Configurações dos cortes** (na
-   página do projeto). Valem para todos os cortes do projeto.
-6. Clique em **Abrir no editor** em um corte para ajustar título, início e fim, corrigir as legendas e o
-   enquadramento, conferir na prévia e clicar em **Exportar MP4**. Quando terminar, **Baixar MP4**. Para exportar
-   vários de uma vez, aprove-os e use **Gerar vídeos dos aprovados** no painel de cortes.
-7. Os arquivos ficam em **Vídeos exportados** (assistir, baixar, abrir no editor ou excluir).
+```powershell
+cd unlock-clips\backend;  .\.venv\Scripts\python.exe -m app --reload
+cd unlock-clips\frontend; npm run dev
+```
 
-Para importar por link: em **Configurações → Links autorizados**, cadastre os domínios das fontes que você
-tem direito de usar (por exemplo, o armazenamento do seu site). Depois, na aba **Usar link**, informe o
-link **direto** do arquivo de vídeo e confirme a autorização.
+## 4. Gerar os primeiros cortes
 
-## Variáveis de ambiente (opcionais)
+1. **Painel** (ou **Criar cortes**): arraste o vídeo (MP4, MOV, MKV, WebM, M4V ou AVI) ou clique em
+   **Escolher arquivo** e em **Analisar vídeo**. Em **Criar cortes** você já escolhe duração (15–30, 30–60 ou
+   60–90 s), formato, estilo e posição da legenda, enquadramento e quantidade de cortes.
+2. A página do projeto mostra o processamento real em segundo plano: verificação → leitura da mídia → áudio →
+   transcrição → sugestão de cortes, com porcentagem e botão **Cancelar**. Na primeira transcrição o modelo é
+   baixado. Pode fechar o navegador: o trabalho continua e o projeto fica salvo.
+3. Em **Cortes sugeridos**, veja a pontuação e os motivos de cada trecho ("Por que esta pontuação?"),
+   pré-visualize, aprove ou descarte.
+4. Clique em **Abrir no editor** para ajustar:
+   - **título**, **início e fim** (±0,5 s ou "usar tempo atual");
+   - **legendas**: corrija palavras, oculte blocos, ajuste tempos, baixe o `.srt`;
+   - **enquadramento**: central, acompanhar o rosto ou posição fixa com zoom — a prévia mostra o resultado na hora;
+   - a aba **Quadro final (exato)** mostra a imagem gerada pelo FFmpeg.
+5. Clique em **Exportar MP4**. Quando terminar, **Baixar MP4**. Para vários cortes de uma vez, aprove-os e use
+   **Gerar vídeos dos aprovados** no projeto.
+6. Em **Vídeos exportados** você assiste, baixa, abre no editor ou exclui os arquivos.
 
-| Variável | Padrão | Uso |
-|----------|--------|-----|
-| `UNLOCK_DATA_DIR` | `backend\data` | onde ficam projetos, vídeos e configurações |
-| `UNLOCK_FRONTEND_DIST` | `frontend\dist` | interface compilada servida pelo back-end |
-| `UNLOCK_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | origens liberadas no CORS |
-| `UNLOCK_MAX_WORKERS` | `2` | tarefas simultâneas em segundo plano |
+**Importar por link:** em **Configurações → Links autorizados**, cadastre os domínios das fontes cujo conteúdo
+você tem direito de usar (por exemplo, o armazenamento do seu site). Na aba **Usar link**, informe o link
+**direto** do arquivo de vídeo e confirme a autorização. Páginas de sites de vídeo, playlists de streaming
+(HLS/DASH) e conteúdo com DRM não são aceitos — a ferramenta não contorna proteções.
 
-Exemplo no PowerShell: `$env:UNLOCK_DATA_DIR = "D:\UnlockClips\dados"` antes de iniciar o back-end.
+## 5. Configurações importantes
 
-## API (resumo)
+- **Transcrição** (Configurações → Transcrição): modelo (*tiny* a *large-v3*; *small* é o melhor equilíbrio em CPU),
+  CPU ou **GPU NVIDIA (CUDA)**, precisão, filtro de voz (VAD) e transcrição automática. Sem internet, baixe os
+  arquivos `config.json`, `model.bin`, `tokenizer.json`, `vocabulary.*` e `preprocessor_config.json` de
+  `https://huggingface.co/Systran/faster-whisper-small` (ou do modelo desejado) e informe a pasta em
+  **Pasta de um modelo próprio**. Tempo aproximado em CPU moderna com *small*: 0,3× a 1× a duração do áudio.
+- **GPU NVIDIA**: drivers atualizados e as bibliotecas cuBLAS e cuDNN para CUDA 12 (veja a documentação do
+  faster-whisper). Em caso de erro ao carregar o modelo, volte para CPU.
+- **Pesos da pontuação** (Configurações → Detecção de cortes): aumente o peso do que é mais importante para o seu
+  conteúdo.
+- **Pasta de dados**: por padrão `unlock-clips\backend\data`. Para usar outro disco, inicie com
+  `iniciar.ps1 -PastaDeDados D:\UnlockClips\dados` (ou defina a variável `UNLOCK_DATA_DIR`).
+  A pasta atual, o espaço livre e o arquivo de log aparecem em **Configurações → Sistema**.
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/api/health` | versão, pasta de dados, FFmpeg/FFprobe e disponibilidade da transcrição |
-| GET | `/api/stats` | totais do painel |
-| GET/PUT | `/api/settings` | configurações globais |
-| GET | `/api/projects` | lista de projetos |
-| POST | `/api/projects/upload?filename=…&title=…&settings=…` | envio do vídeo como corpo bruto |
-| POST | `/api/projects/from-link` | importação de link autorizado |
-| GET/PATCH/DELETE | `/api/projects/{id}` | consultar, editar título/configurações, excluir |
-| POST | `/api/projects/{id}/cancel` | cancelar a tarefa em andamento |
-| POST | `/api/projects/{id}/retry` | tentar novamente após erro/cancelamento/interrupção (refaz só a etapa que falhou), ou extrair o áudio de projetos da Etapa 1 |
-| POST | `/api/projects/{id}/transcribe` | iniciar ou refazer a transcrição |
-| GET | `/api/projects/{id}/transcript` | transcrição completa (trechos e palavras com tempos) |
-| GET | `/api/projects/{id}/transcript.srt` · `.vtt` · `.txt` | download da transcrição |
-| GET | `/api/transcription/models` | modelos disponíveis e quais já foram baixados |
-| POST | `/api/projects/{id}/clips/detect` | gerar ou refazer sugestões (`{"keep_curated": true}` mantém os curados) |
-| GET | `/api/projects/{id}/clips` | cortes com pontuação, critérios, motivos e avisos |
-| POST | `/api/projects/{id}/clips` | criar corte manual (`start`, `end`, `title`) |
-| PATCH/DELETE | `/api/projects/{id}/clips/{clip_id}` | editar título, status, início/fim (recalcula), enquadramento (`framing_override`; `null` = padrão do projeto) ou excluir |
-| GET | `/api/clip-scoring/criteria` | critérios da pontuação, descrições e pesos padrão |
-| POST | `/api/projects/{id}/clips/render` | gerar MP4 (`{"clip_ids": [...]}`; vazio = todos os aprovados) |
-| GET | `/api/projects/{id}/clips/{clip_id}/subtitles` | blocos de legenda do corte (prévia e editor) |
-| PUT/DELETE | `/api/projects/{id}/clips/{clip_id}/subtitles` | salvar legendas editadas (`{"cues": [{start, end, text, hidden}]}`) / voltar às automáticas |
-| GET | `/api/projects/{id}/clips/{clip_id}/subtitles.srt` | legendas do corte em SRT (com as edições) |
-| GET | `/api/projects/{id}/clips/{clip_id}/framing` | enquadramento calculado (central, manual ou por rosto) |
-| GET | `/api/projects/{id}/clips/{clip_id}/frame.jpg?t=` | quadro exato do vídeo final em `t` segundos do corte |
-| GET | `/api/subtitle-templates` | modelos de legenda |
-| GET | `/api/projects/{id}/source` | vídeo original (com suporte a `Range`) |
-| GET | `/api/projects/{id}/audio` | áudio extraído (WAV mono 16 kHz, com suporte a `Range`) |
-| GET | `/api/projects/{id}/thumbnail` | miniatura JPEG |
-| GET | `/api/exports` | vídeos exportados (todos os projetos) |
-| GET/DELETE | `/api/projects/{id}/exports` | vídeos exportados do projeto / excluir todos |
-| GET/DELETE | `/api/projects/{id}/exports/{arquivo}` | baixar (`?download=false` exibe no navegador) / excluir um vídeo |
-| GET | `/api/projects/{id}/storage` · `/api/storage` | espaço em disco por projeto |
+## 6. Solução de problemas
 
-Documentação interativa: http://127.0.0.1:8000/docs
+| Problema | Solução |
+|----------|---------|
+| "a execução de scripts foi desabilitada neste sistema" | Use os arquivos `.bat` ou rode `powershell -ExecutionPolicy Bypass -File .\scripts\...` (não altera a política do Windows). |
+| "Python 3.10 a 3.13 não encontrado" | `winget install -e --id Python.Python.3.12` e abra um PowerShell novo. O atalho "python" da Microsoft Store não serve. |
+| FFmpeg não encontrado / "sem o codificador libx264" | `winget install -e --id Gyan.FFmpeg` e reinicie o UNLOCK CLIPS, ou informe a pasta `bin` do FFmpeg em Configurações → FFmpeg. |
+| "A porta 8000 já está sendo usada" | Feche o outro programa ou use `iniciar.ps1 -Porta 8010`. |
+| O vídeo original não toca no navegador | Alguns codecs não tocam em certos navegadores; o processamento funciona normalmente e a aba "Quadro final" mostra o resultado. |
+| "o arquivo está aberto em outro programa" ao gerar | Feche o MP4 no player (o Windows impede substituir arquivos abertos) e clique em **Tentar novamente**. |
+| "Espaço em disco insuficiente" | Exclua vídeos exportados (Vídeos exportados ou quadro "Espaço em disco" do projeto) ou projetos antigos, ou mova a pasta de dados para outro disco. |
+| Download do modelo falha (rede/empresa) | Baixe o modelo manualmente e use **Pasta de um modelo próprio** (seção 5). |
+| Erro com GPU/CUDA | Selecione CPU em Configurações → Transcrição. |
+| Antivírus bloqueia ou deixa lento | Adicione a pasta `unlock-clips` às exclusões (o FFmpeg lê e grava arquivos grandes). |
+| Fechei a aplicação no meio de uma tarefa | O projeto aparece como **Interrompido**: clique em **Tentar novamente** (retoma só a etapa que faltou). |
+| Outro problema | Veja o log em `backend\data\logs\unlock-clips.log` (o caminho exato está em Configurações → Sistema). |
 
-## Próximos passos
+## 7. Backup, atualização e desinstalação
 
-- **Etapa 7** — testes finais, documentação e preparação para execução no Windows.
-- **Opcional** — refinamento das sugestões por IA generativa (por exemplo, para reescrever títulos ou
-  reordenar candidatos). Não está incluído: exigiria um modelo local adicional ou uma API paga, que seria
-  claramente identificada como tal e sempre opcional.
+- **Backup / mudar de computador**: copie a pasta de dados (`backend\data`). Ela contém projetos, vídeos,
+  transcrições, cortes, exportados, modelos e configurações. Com o UNLOCK CLIPS fechado, basta colocá-la no mesmo
+  lugar (ou apontar `-PastaDeDados`) no outro computador.
+- **Atualizar**: com a aplicação fechada, atualize o código (`git pull` ou nova cópia, preservando
+  `backend\data`) e execute `Instalar UNLOCK CLIPS.bat` de novo. Projetos de versões anteriores continuam
+  funcionando.
+- **Desinstalar**: apague a pasta `unlock-clips` (isso inclui os dados, se estiverem em `backend\data`) e o atalho
+  da Área de Trabalho. Python, Node.js e FFmpeg podem ser removidos em "Adicionar ou remover programas".
 
-## Uso responsável
+## 8. Testes
 
-Use apenas conteúdos que você produziu ou que tem autorização para editar e publicar. A importação por
-link aceita somente arquivos diretos de domínios cadastrados por você e não implementa nenhum mecanismo
-para contornar DRM, autenticação ou restrições de acesso de plataformas.
+```powershell
+cd C:\UNLOCK-CLIPS\unlock-clips
+powershell -ExecutionPolicy Bypass -File .\scripts\instalar.ps1 -Dev      # uma vez: instala o pytest
+powershell -ExecutionPolicy Bypass -File .\scripts\testar.ps1             # back-end + interface + compilação
+```
+
+Ou separadamente:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest                  # testes do back-end
+.\.venv\Scripts\python.exe -m pytest --cov=app        # com cobertura
+cd ..\frontend
+npm test                                              # testes da interface (Vitest)
+npm run test:coverage                                 # cobertura da interface
+npm run build                                         # verificação de tipos + compilação
+```
+
+- Os testes do back-end geram pequenos vídeos reais com o FFmpeg e exercitam leitura da mídia, extração de áudio,
+  transcrição (com um modelo Whisper minúsculo de pesos aleatórios, montado por `tests/tiny_whisper.py`), detecção
+  de cortes, legendas no libass, enquadramento por rosto (foto de domínio público), geração do MP4, edição,
+  exportados e o **fluxo completo** do envio ao MP4. Sem FFmpeg no PATH, os testes que dependem dele são pulados.
+- **Teste de ponta a ponta com o servidor rodando** (usa um modelo Whisper real, baixado na primeira vez):
+
+```powershell
+.\backend\.venv\Scripts\python.exe .\scripts\teste_completo.py --video C:\videos\entrevista.mp4 --modelo tiny
+```
+
+  Ele envia o vídeo, espera transcrição e sugestões, edita um corte (título, enquadramento, legenda), gera o MP4,
+  confere o arquivo com o FFprobe e exclui o projeto de teste (`--manter` para mantê-lo).
+- **Integração contínua** (`.github/workflows/unlock-clips.yml`): a cada envio ao GitHub, os testes rodam no
+  **Windows** (Python 3.12 e 3.13) e no Linux, e um job no Windows executa `instalar.ps1`, inicia o servidor com
+  `iniciar.ps1` e roda o teste de ponta a ponta com fala sintetizada e o modelo Whisper *tiny*.
+
+## 9. Limitações conhecidas
+
+- A qualidade das sugestões depende da transcrição: modelos pequenos erram mais em áudio ruidoso ou com sotaque
+  forte. A pontuação é heurística (regras explicáveis), não uma previsão de desempenho nas redes.
+- O acompanhamento de rosto segue o rosto principal (maior/mais estável), não necessariamente quem está falando.
+- Expressões da pontuação existem para português, inglês e espanhol; outros idiomas usam a lista em português.
+- A prévia ao vivo depende de o navegador reproduzir o vídeo original; o MP4 final é sempre H.264 compatível.
+- Não há refinamento por IA generativa: para manter tudo gratuito e local, as sugestões usam regras. A arquitetura
+  permite acrescentar um modelo local ou uma API (que seria paga e claramente identificada) como etapa opcional.
+
+## 10. Uso responsável e licenças
+
+Use apenas conteúdos que você produziu ou que tem autorização para editar e publicar. A importação por link aceita
+somente domínios que você cadastrou e arquivos de vídeo diretos; não há nenhum mecanismo para contornar DRM,
+login, pagamento ou outras restrições de acesso.
+
+Componentes de terceiros: FFmpeg (LGPL/GPL, instalado à parte), faster-whisper e CTranslate2 (MIT), modelos
+Whisper (MIT), OpenCV (Apache 2.0), modelo YuNet de detecção de rostos (MIT,
+`backend/app/assets/face_detection_yunet_LICENSE.txt`), React, Vite, Tailwind CSS e lucide (MIT/ISC).

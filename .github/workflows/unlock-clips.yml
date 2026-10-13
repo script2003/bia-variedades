@@ -118,7 +118,10 @@ jobs:
             Write-Warning "Síntese de voz indisponível ($_): o teste usará um vídeo sem fala."
             [IO.File]::AppendAllText($env:GITHUB_ENV, "E2E_ARGS=`n")
           }
-      - name: Iniciar o servidor (scripts\iniciar.ps1)
+      # Num único passo: o GitHub Actions encerra os processos iniciados por um passo quando ele termina.
+      - name: Iniciar o servidor (iniciar.ps1) e testar o fluxo completo (teste_completo.py)
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           $saida = Join-Path $env:RUNNER_TEMP "servidor"
           Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts\iniciar.ps1", "-SemNavegador" `
@@ -131,15 +134,14 @@ jobs:
           $saude | ConvertTo-Json
           $pagina = Invoke-WebRequest http://127.0.0.1:8000/projetos -UseBasicParsing
           if ($pagina.Content -notmatch "UNLOCK CLIPS") { throw "A interface não foi servida." }
-      - name: Teste de ponta a ponta (scripts\teste_completo.py)
-        run: |
+
           $argumentos = "scripts\teste_completo.py --modelo tiny --saida `"$env:RUNNER_TEMP\saida`" $env:E2E_ARGS"
           $processo = Start-Process backend\.venv\Scripts\python.exe -ArgumentList $argumentos -NoNewWindow -Wait -PassThru
-          if ($processo.ExitCode -ne 0) { throw "O teste de ponta a ponta falhou." }
-      - name: Segunda inicialização reconhece o servidor em execução
-        run: |
+          if ($processo.ExitCode -ne 0) { Get-Content "$saida.err" -Tail 40; throw "O teste de ponta a ponta falhou." }
+
+          Write-Host "`nSegunda inicialização (deve reconhecer o servidor já aberto):"
           .\scripts\iniciar.ps1 -SemNavegador
-          if ($LASTEXITCODE -ne 0) { throw "código $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "A segunda inicialização falhou (código $LASTEXITCODE)." }
       - name: Guardar vídeo gerado e logs
         if: always()
         uses: actions/upload-artifact@v4

@@ -21,7 +21,9 @@ export default function JobProgress({ project, onChange, onError }: Props) {
   const cancel = async () => {
     setCancelling(true);
     try {
-      onChange?.(await api.cancelJob(project.id));
+      // A chamada fica fora de "onChange?.()": com o encadeamento opcional, sem onChange o cancelamento nem seria enviado.
+      const updated = await api.cancelJob(project.id);
+      onChange?.(updated);
     } catch (err) {
       onError?.(err instanceof Error ? err.message : String(err));
     } finally {
