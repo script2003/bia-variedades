@@ -2,7 +2,7 @@
 //
 //   NODE_PATH=$(npm root -g) node render.cjs
 //
-// Gera output/unlock-v2.mp4 (~7 MB, alta qualidade).
+// Gera output/unlock-v2.mp4 (só música) e output/unlock-v2-narrado.mp4 (com narração).
 // Requer: Playwright (Chromium), ffmpeg e python3 com numpy.
 const { chromium } = require("playwright");
 const { spawn, execFileSync } = require("child_process");
@@ -51,5 +51,15 @@ const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
   await browser.close();
   process.stdout.write(`\rsubquadros ${total}/${total}  ok\n`);
 
-  console.log("pronto:", file);
+  // narrated copy: voice + music that ducks under the voice
+  const voz = path.join(OUT, "narracao.wav"), narrado = path.join(OUT, "unlock-v2-narrado.mp4");
+  run("python3", [path.join(DIR, "narracao.py"), voz]);
+  const vf = "aresample=44100,highpass=f=90,equalizer=f=3200:t=q:w=1.2:g=3,equalizer=f=250:t=q:w=1:g=-2," +
+    "acompressor=threshold=-20dB:ratio=3.5:attack=4:release=90:makeup=4,aecho=0.8:0.5:35:0.12,pan=stereo|c0=c0|c1=c0";
+  const duck = "sidechaincompress=threshold=0.012:ratio=8:attack=6:release=260:makeup=1";
+  run("ffmpeg", ["-y", "-v", "error", "-i", file, "-i", audio, "-i", voz, "-filter_complex",
+    `[2:a]${vf},asplit=2[v][sc];[1:a]volume=0.62[m0];[m0][sc]${duck}[m];[m][v]amix=inputs=2:normalize=0,alimiter=limit=0.95,loudnorm=I=-14:TP=-1.0:LRA=9[a]`,
+    "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", narrado]);
+
+  console.log("pronto:", file, narrado);
 })().catch(e => { console.error(e); process.exit(1); });
