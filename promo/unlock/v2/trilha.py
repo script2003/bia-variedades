@@ -4,12 +4,25 @@ Pop eletrônico leve, com efeitos sonoros sincronizados a cada animação
 (pops, cliques, whooshes, ticks do contador, impactos).
 Uso: python3 trilha.py saida.wav
 """
+import json
+import os
 import sys
 import wave
 import numpy as np
 
 SR = 44100
-DUR = 20.0
+# mapa de tempo gerado por narracao.py (pausas esticadas para a narração caber)
+_tp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tempo.json")
+TEMPO = json.load(open(_tp)) if os.path.exists(_tp) else {"dur": 20.0, "knots": [[0, 0], [20, 20]]}
+_ko, _kn = zip(*TEMPO["knots"])
+
+
+def W(t):
+    """instante da animação original -> instante no vídeo final"""
+    return float(np.interp(t, _ko, _kn))
+
+
+DUR = float(TEMPO["dur"])
 N = int(SR * DUR)
 BEAT = 0.5
 rng = np.random.default_rng(7)
@@ -123,21 +136,22 @@ def bar(t): return int(t // 2) % 4
 
 
 t_all = np.arange(N) / SR
-groove = lambda t: (0 <= t < 3.0) or (3.5 <= t < 15.5) or (15.82 <= t < 18.5)
+groove = lambda t: (0 <= t < W(3.0)) or (W(3.5) <= t < W(15.5)) or (W(15.82) <= t < W(18.5))
+NB, N16 = int(DUR / BEAT), int(DUR / 0.125)
 
 # drums
-kicks = [b * BEAT for b in range(40) if groove(b * BEAT)]
+kicks = [b * BEAT for b in range(NB) if groove(b * BEAT)]
 for kt in kicks:
-    add(kick(0.75 if kt < 3 else 1.0), kt)
-for b in range(40):
+    add(kick(0.75 if kt < W(3.0) else 1.0), kt)
+for b in range(NB):
     t0 = b * BEAT
     if groove(t0) and b % 2 == 1:
         add(snap(), t0, 0.8, rev=0.2)
     if groove(t0 + 0.25):
         add(hat(), t0 + 0.25, 0.9, pan=0.25)
-for s16 in range(160):
+for s16 in range(N16):
     t0 = s16 * 0.125
-    if 3.5 <= t0 < 15.5 and s16 % 2:
+    if W(3.5) <= t0 < W(15.5) and s16 % 2:
         add(hat(0.45, 110), t0, pan=-0.3)
 
 # sidechain
@@ -148,7 +162,7 @@ for kt in kicks:
 
 # bass (8ths)
 bass = np.zeros(N)
-for e in range(80):
+for e in range(int(DUR / 0.25)):
     st = e * 0.25
     if not groove(st):
         continue
@@ -161,19 +175,19 @@ L += bass * .5; R += bass * .5
 
 # pad
 pad = np.zeros(N)
-for b in range(10):
-    i0, i1 = idx(b * 2.0), idx(b * 2.0 + 2.0); seg = t_all[i0:i1]
+for b in range(int(np.ceil(DUR / 2.0))):
+    i0, i1 = idx(b * 2.0), min(N, idx(b * 2.0 + 2.0)); seg = t_all[i0:i1]
     for n in CH[b % 4]:
         for det in (-0.1, 0.1):
             pad[i0:i1] += saw(note(n) * 2 ** (det / 12), seg) * .09
-pad = lp(pad, np.interp(t_all, [0, 3, 3.5, 15.5, 15.82, 18.5, 20], [1800, 2500, 1200, 3200, 900, 3500, 800]))
-pad *= np.interp(t_all, [0, .2, 18.5, 19.8, 20], [0, .6, .6, 0, 0]) * duck
+pad = lp(pad, np.interp(t_all, [W(x) for x in [0, 3, 3.5, 15.5, 15.82, 18.5, 20]], [1800, 2500, 1200, 3200, 900, 3500, 800]))
+pad *= np.interp(t_all, [0, .2, W(18.5), W(19.8), DUR], [0, .6, .6, 0, 0]) * duck
 L += pad; R += np.roll(pad, 280); send += pad * .2
 
 # arp (16ths) through the main groove
-for s16 in range(160):
+for s16 in range(N16):
     st = s16 * 0.125
-    if not (3.5 <= st < 15.5 or 15.82 <= st < 18.5):
+    if not (W(3.5) <= st < W(15.5) or W(15.82) <= st < W(18.5)):
         continue
     ch = CH[bar(st)]
     n = (ch + [ch[0] + 12, ch[1] + 12])[[0, 2, 1, 3, 4, 2, 3, 1][s16 % 8]] + 12
@@ -200,21 +214,21 @@ fx = [
     (whoosh(.3, g=.4), 17.4, 1), (pop(700, 240), 18.72, .7),
 ]
 for sig, at, g in fx:
-    add(sig, at, g, rev=.25)
+    add(sig, W(at), g, rev=.25)
 # counter ticks (follow the eased count 8.1 → 9.0 s)
 for i in range(1, 26):
     k = i / 26
     tk = 8.1 + 0.9 * (1 - (1 - k) ** (1 / 3))
-    add(tick(2200 + 40 * i, .35), tk)
+    add(tick(2200 + 40 * i, .35), W(tk))
 # sparkle on the invitation text
 for i, n in enumerate([84, 88, 91, 96]):
-    add(plink(note(n), .18), 17.65 + i * 0.06, pan=-.3 + .2 * i, rev=.5)
+    add(plink(note(n), .18), W(17.65) + i * 0.06, pan=-.3 + .2 * i, rev=.5)
 # final chord
 stab = np.zeros(idx(2.2)); st_t = tt(2.2)
 for n in [60, 64, 67, 72, 76]:
     stab += saw(note(n), st_t) * .1 + saw(note(n) * 1.004, st_t) * .1
 stab = lp(stab, 3500 * np.exp(-st_t * 1.6) + 300) * np.exp(-st_t * 1.7)
-add(stab, 18.72, .9, rev=.6)
+add(stab, W(18.72), .9, rev=.6)
 
 # ---------------- reverb + master ----------------
 ir_t = tt(1.6)
@@ -225,7 +239,7 @@ wet = np.fft.irfft(np.fft.rfft(send, nfft) * np.fft.rfft(ir, nfft), nfft)[:N]
 L += wet * .3; R += np.roll(wet, 400) * .3
 
 mix = np.stack([L, R], axis=1)
-mix *= np.interp(t_all, [0, .02, 19.3, 20.0], [0, 1, 1, 0])[:, None]
+mix *= np.interp(t_all, [0, .02, W(19.3), DUR], [0, 1, 1, 0])[:, None]
 mix = np.tanh(mix * 1.4) / np.tanh(1.4)
 mix /= np.max(np.abs(mix)) + 1e-9
 mix *= .89

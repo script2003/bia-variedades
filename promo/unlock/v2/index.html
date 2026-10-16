@@ -40,10 +40,21 @@
 </div>
 
 <script src="textos.js"></script>
+<script src="tempo.js"></script>
 <script>
 (() => {
 "use strict";
-const DUR = 20, W = 1080, H = 1920;
+const ORIG = 20, W = 1080, H = 1920;
+// tempo.js (gerado por narracao.py) estica só as pausas das cenas para a narração caber
+const TEMPO = window.TEMPO || { dur: ORIG, knots: [[0, 0], [ORIG, ORIG]] };
+const DUR = TEMPO.dur;
+function unwarp(T) {
+  const k = TEMPO.knots;
+  for (let i = 1; i < k.length; i++) {
+    if (T <= k[i][1]) { const [o0, n0] = k[i - 1], [o1, n1] = k[i]; return o0 + (o1 - o0) * (n1 > n0 ? (T - n0) / (n1 - n0) : 0); }
+  }
+  return ORIG;
+}
 const TX = window.TEXTOS;
 const params = new URLSearchParams(location.search);
 
@@ -563,8 +574,8 @@ const UPD = {
   Q(t) { S(sc.Q.icon, { s: E.outBack(prog(t, 18.72, 19.05)) }); },
 };
 
-function renderAt(t) {
-  t = clamp(t, 0, DUR - 1e-6);
+function renderAt(T) {
+  const t = clamp(unwarp(clamp(T, 0, DUR)), 0, ORIG - 1e-6);
   drawBack(t);
   cursorAt(0, 0, 1, 0);
   for (const [k, [a, b]] of Object.entries(WINDOWS)) {

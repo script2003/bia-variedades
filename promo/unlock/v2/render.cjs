@@ -3,6 +3,7 @@
 //   NODE_PATH=$(npm root -g) node render.cjs
 //
 // Gera output/unlock-v2.mp4 (só música) e output/unlock-v2-narrado.mp4 (com narração).
+// A duração vem da narração (tempo.js), hoje ~33 s.
 // Requer: Playwright (Chromium), ffmpeg e python3 com numpy.
 const { chromium } = require("playwright");
 const { spawn, execFileSync } = require("child_process");
@@ -15,6 +16,10 @@ fs.mkdirSync(OUT, { recursive: true });
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
 
 (async () => {
+  // 1) narration first: it writes tempo.js/tempo.json (scene holds stretched so the voice fits)
+  const voz = path.join(OUT, "narracao.wav"), narrado = path.join(OUT, "unlock-v2-narrado.mp4");
+  run("python3", [path.join(DIR, "narracao.py"), voz]);
+  // 2) music + sound effects follow the same time map
   const audio = path.join(OUT, "trilha-v2.wav");
   run("python3", [path.join(DIR, "trilha.py"), audio]);
 
@@ -52,15 +57,18 @@ const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
   process.stdout.write(`\rsubquadros ${total}/${total}  ok\n`);
 
   // narrated copy: voice + music that ducks under the voice
-  const voz = path.join(OUT, "narracao.wav"), narrado = path.join(OUT, "unlock-v2-narrado.mp4");
-  run("python3", [path.join(DIR, "narracao.py"), voz]);
   // light processing only: echo and heavy compression made the voice sound synthetic
   const vf = "aresample=44100,highpass=f=80,equalizer=f=2800:t=q:w=1.5:g=1.5," +
     "acompressor=threshold=-18dB:ratio=2:attack=10:release=150:makeup=2,pan=stereo|c0=c0|c1=c0";
   const duck = "sidechaincompress=threshold=0.02:ratio=4:attack=10:release=300:makeup=1";
-  run("ffmpeg", ["-y", "-v", "error", "-i", file, "-i", audio, "-i", voz, "-filter_complex",
+  const mix = (vozWav, out) => run("ffmpeg", ["-y", "-v", "error", "-i", file, "-i", audio, "-i", vozWav, "-filter_complex",
     `[2:a]${vf},asplit=2[v][sc];[1:a]volume=0.75[m0];[m0][sc]${duck}[m];[m][v]amix=inputs=2:normalize=0,alimiter=limit=0.95,loudnorm=I=-14:TP=-1.0:LRA=9[a]`,
-    "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", narrado]);
+    "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", out]);
+  mix(voz, narrado);
+  // male voice on the same timing (TEMPO_FIXO keeps tempo.json, so the video stays in sync)
+  const vozM = path.join(OUT, "narracao-masculino.wav"), narradoM = path.join(OUT, "unlock-v2-narrado-masculino.mp4");
+  execFileSync("python3", [path.join(DIR, "narracao.py"), vozM], { stdio: "inherit", env: { ...process.env, TEMPO_FIXO: "1", VOZ: "pm_alex" } });
+  mix(vozM, narradoM);
 
-  console.log("pronto:", file, narrado);
+  console.log("pronto:", file, narrado, narradoM);
 })().catch(e => { console.error(e); process.exit(1); });

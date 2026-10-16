@@ -2,3 +2,4 @@ output/*.wav
 output/*.log
 output/ffmpeg2pass*
 output/narracao.wav
+output/narracao-masculino.wav
