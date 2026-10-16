@@ -3,3 +3,4 @@ output/*.log
 output/ffmpeg2pass*
 output/narracao.wav
 output/narracao-masculino.wav
+__pycache__/
