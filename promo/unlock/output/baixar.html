@@ -1,0 +1,94 @@
+<title>Vídeo Unlock Config</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;600&display=swap">
+<style>
+  /* Layout: uma coluna estreita, os dois vídeos lado a lado quando há espaço */
+  :root {
+    --bg: #06060d; --surface: #11111f; --line: #2a2546; --fg: #f3f1fb; --muted: #a9a4c2;
+    --accent: #8b5cf6; --accent-hi: #c4b5fd; --ok: #4ade80; --err: #f87171;
+    --display: "Anton", Impact, "Arial Narrow", sans-serif;
+    --body: "Inter", system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 var(--body); }
+  main { max-width: 860px; margin: 0 auto; padding-block: 40px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: grid; gap: 28px; }
+  .eyebrow { font: 700 12px var(--mono); letter-spacing: .28em; color: var(--accent-hi); text-transform: uppercase; margin: 0; }
+  h1 { font: 400 clamp(40px, 9vw, 64px)/1 var(--display); text-transform: uppercase; margin: 8px 0 10px; text-wrap: balance; }
+  .lead { color: var(--muted); margin: 0; max-width: 60ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+  video { width: 100%; max-width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 10px; display: block; }
+  figcaption { display: grid; gap: 2px; }
+  figcaption strong { font-weight: 600; }
+  figcaption span { color: var(--muted); font: 500 12px var(--mono); letter-spacing: .04em; }
+  button { font: 600 16px var(--body); color: #fff; background: var(--accent); border: 0; border-radius: 10px; padding: 14px 16px; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  button:focus-visible { outline: 3px solid var(--accent-hi); outline-offset: 2px; }
+  button:disabled { opacity: .6; cursor: progress; }
+  .status { min-height: 1.4em; margin: 0; font-size: 14px; color: var(--muted); }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  .help { border-top: 1px solid var(--line); padding-top: 20px; color: var(--muted); font-size: 14px; display: grid; gap: 8px; }
+  .help h2 { font: 700 12px var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--accent-hi); margin: 0; }
+  .help p { margin: 0; max-width: 65ch; }
+  .help a { color: var(--accent-hi); word-break: break-all; }
+</style>
+
+<main>
+  <header>
+    <p class="eyebrow">Unlock config · TikTok 9:16</p>
+    <h1>Seu vídeo promocional</h1>
+    <p class="lead">20 segundos, 1080 × 1920, com trilha original. Toque em “Baixar” embaixo da versão que você quer salvar no celular.</p>
+  </header>
+
+  <section class="grid">
+    <figure>
+      <video src="unlock-com-textos.mp4" controls playsinline preload="metadata"></video>
+      <figcaption><strong>Com textos</strong><span>MP4 · 11 MB</span></figcaption>
+      <button type="button" data-src="unlock-com-textos.mp4" data-name="unlock-promo-com-textos.mp4">Baixar vídeo com textos</button>
+      <p class="status" aria-live="polite"></p>
+    </figure>
+    <figure>
+      <video src="unlock-sem-textos.mp4" controls playsinline preload="metadata"></video>
+      <figcaption><strong>Sem textos</strong><span>MP4 · 11 MB · para escrever no CapCut</span></figcaption>
+      <button type="button" data-src="unlock-sem-textos.mp4" data-name="unlock-promo-sem-textos.mp4">Baixar vídeo sem textos</button>
+      <p class="status" aria-live="polite"></p>
+    </figure>
+  </section>
+
+  <section class="help">
+    <h2>Se o botão não funcionar</h2>
+    <p>Abra o vídeo em tela cheia e use o menu ⋮ do player para baixar. Outra opção é abrir este link no navegador, com sua conta do GitHub logada (versão em qualidade máxima, 31 MB):</p>
+    <p><a href="https://github.com/script2003/bia-variedades/raw/ccr-d7f0f149-z0v90e/promo/unlock/output/unlock-promo-com-textos.mp4" target="_blank" rel="noopener">github.com/script2003/bia-variedades/raw/ccr-d7f0f149-z0v90e/promo/unlock/output/unlock-promo-com-textos.mp4</a></p>
+  </section>
+</main>
+
+<script>
+(async () => {
+  const buttons = [...document.querySelectorAll("button[data-src]")];
+  const downloads = await (window.claude?.use?.("downloads") ?? Promise.resolve(null)).catch(() => null);
+  if (!downloads) {
+    buttons.forEach(b => { b.hidden = true; b.nextElementSibling.textContent = "Para baixar, use o menu ⋮ do player ou o link abaixo."; });
+    return;
+  }
+  buttons.forEach(btn => btn.addEventListener("click", async () => {
+    const status = btn.nextElementSibling;
+    btn.disabled = true; status.className = "status"; status.textContent = "Preparando o arquivo…";
+    try {
+      const res = await fetch(btn.dataset.src);
+      if (!res.ok) throw { code: "fetch", message: "HTTP " + res.status };
+      const blob = await res.blob();
+      status.textContent = "Confirme o download na janela que abriu.";
+      await downloads.save({ filename: btn.dataset.name, data: blob });
+      status.className = "status ok"; status.textContent = "Pronto! O vídeo foi enviado para os seus downloads.";
+    } catch (e) {
+      status.className = "status err";
+      status.textContent = e?.code === "declined" ? "Download cancelado. Toque no botão de novo quando quiser."
+        : e?.code === "rate_limited" ? "Já existe um download aberto. Espere alguns segundos e tente de novo."
+        : "Não deu para baixar aqui. Use o menu ⋮ do player ou o link abaixo.";
+    } finally { btn.disabled = false; }
+  }));
+})();
+</script>
