@@ -5,7 +5,7 @@ A pronúncia está escrita em IPA (fonemas) para não depender de pacotes extern
 Se uma fala não couber na janela, a velocidade aumenta só naquela fala.
 
 Uso:  python3 narracao.py saida.wav
-Requer: numpy, onnxruntime e o modelo kokoro-q8.onnx (veja README.md).
+Requer: numpy, onnxruntime e o modelo kokoro-fp32.onnx (versão completa, veja README.md).
 """
 import json
 import os
@@ -18,30 +18,26 @@ import onnxruntime as ort
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VOZES = os.path.join(HERE, "..", "assets", "vozes")
-MODELO = os.environ.get("KOKORO_MODEL", os.path.join(VOZES, "kokoro-q8.onnx"))
+MODELO = os.environ.get("KOKORO_MODEL", os.path.join(VOZES, "kokoro-fp32.onnx"))
 VOZ = os.environ.get("VOZ", "pf_dora")  # pf_dora (feminina) · pm_alex · pm_santa (masculinas)
 SR = 24000
 DUR = 20.0
 
+# Frases inteiras soam mais naturais do que palavras soltas: a entonação flui pela frase.
 # (início em s, duração máxima em s, fonemas, texto falado)
 FALAS = [
-    (0.10, 1.35, "kˈɛɾ mˈajs ˈɛfi pˈe ˈɛsi?", "Quer mais FPS?"),
-    (1.58, 0.55, "ʤi fˈɔɾmɐ…", "De forma..."),
-    (2.12, 0.45, "flˈujdɐ!", "Fluida!"),
-    (2.62, 0.60, "pɾesˈizɐ.", "Precisa."),
-    (3.62, 1.50, "kõɲˈesɐ a ɐ̃nlˈɔki kˈõfiɡi.", "Conheça a Unlock Config."),
-    (5.25, 1.60, "ˈumɐ komunidˈaʤi nʊ ʤiskˈɔɾʤi.", "Uma comunidade no Discord."),
-    (7.05, 1.05, "ʒˈɔɡi sˈẽj limˈiʧis!", "Jogue sem limites!"),
-    (8.12, 1.35, "mˈajs ʤi mˈiw mˈẽbɾʊs.", "Mais de mil membros."),
-    (9.62, 1.60, "sˈẽtʊ i kwaɾˈẽtɐ i kwˈatɾʊ ˈɛfi pˈe ˈɛsi.", "Cento e quarenta e quatro FPS."),
-    (11.25, 0.55, "mˈɛtodʊ,", "Método,"),
-    (11.82, 0.62, "kimˈawzi pɾˈo,", "Keymouse Pro,"),
-    (12.42, 1.20, "oʧimizasˈɐ̃w̃ estɾˈemɐ.", "Otimização extrema."),
-    (13.72, 0.95, "mˈajs dezẽpˈeɲʊ.", "Mais desempenho."),
-    (14.88, 0.85, "mˈajs vitˈɔɾjɐs.", "Mais vitórias."),
-    (15.86, 0.82, "ɐ̃nlˈɔki kˈõfiɡi.", "Unlock Config."),
-    (16.72, 0.90, "ʒˈɔɡi sˈẽj limˈiʧis.", "Jogue sem limites."),
-    (17.65, 1.30, "ʧi espeɾˈɐmʊz nʊ ʤiskˈɔɾʤi!", "Te esperamos no Discord!"),
+    (0.10, 2.85, "kˈɛɾ mˈajs ˈɛfi pˈe ˈɛsi? ʤi fˈɔɾmɐ flˈujdɐ, i pɾesˈizɐ.",
+     "Quer mais FPS? De forma fluida, e precisa."),
+    (3.62, 3.30, "kõɲˈesɐ a ɐ̃nlˈɔki kˈõfiɡi, ˈumɐ komunidˈaʤi nʊ ʤiskˈɔɾʤi.",
+     "Conheça a Unlock Config, uma comunidade no Discord."),
+    (7.05, 2.45, "ʒˈɔɡi sˈẽj limˈiʧis, kõ mˈajs ʤi mˈiw mˈẽbɾʊs.",
+     "Jogue sem limites, com mais de mil membros."),
+    (9.62, 3.95, "sˈẽtʊ i kwaɾˈẽtɐ i kwˈatɾʊ ˈɛfi pˈe ˈɛsi, kimˈawzi pɾˈo, i oʧimizasˈɐ̃w̃ estɾˈemɐ.",
+     "Cento e quarenta e quatro FPS, Keymouse Pro, e Otimização Extrema."),
+    (13.72, 1.95, "mˈajs dezẽpˈeɲʊ. mˈajs vitˈɔɾjɐs.",
+     "Mais desempenho. Mais vitórias."),
+    (15.86, 3.45, "ɐ̃nlˈɔki kˈõfiɡi. ʒˈɔɡi sˈẽj limˈiʧis. ʧi espeɾˈɐmʊz nʊ ʤiskˈɔɾʤi!",
+     "Unlock Config. Jogue sem limites. Te esperamos no Discord!"),
 ]
 
 vocab = json.load(open(os.path.join(VOZES, "kokoro-config.json"), encoding="utf-8"))["vocab"]
@@ -79,10 +75,10 @@ def trim(w, thr=0.012):
 
 track = np.zeros(int(SR * DUR), dtype=np.float32)
 for start, maxd, ph, txt in FALAS:
-    speed = 1.12
+    speed = 1.0  # velocidade natural
     w = synth(ph, speed)
     if len(w) / SR > maxd:
-        speed = min(1.4, speed * (len(w) / SR) / maxd * 1.02)
+        speed = min(1.2, speed * (len(w) / SR) / maxd * 1.02)
         w = synth(ph, speed)
     i = int(start * SR)
     w = w[: len(track) - i]

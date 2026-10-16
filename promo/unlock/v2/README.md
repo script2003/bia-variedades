@@ -11,23 +11,26 @@ marca com círculos concêntricos. 20 s, 1080 × 1920, 30 fps, com motion blur r
 | Arquivo | Uso |
 |---|---|
 | `output/unlock-v2-narrado.mp4` | **Com narração** (voz feminina) + música, ~7 MB |
+| `output/unlock-v2-narrado-masculino.mp4` | Com narração (voz masculina) + música, ~7 MB |
 | `output/unlock-v2.mp4` | Só música e efeitos, ~7 MB |
 
 ## Narração
 
-Como no vídeo de referência, uma voz fala as mesmas palavras que aparecem na tela, no mesmo
-instante. A música abaixa sozinha enquanto a voz fala.
+Como no vídeo de referência, a voz acompanha as frases da tela. São 6 frases inteiras, faladas em
+velocidade quase natural (1,0× a 1,1×), para a entonação soar humana. A música abaixa sozinha
+enquanto a voz fala.
 
 - Voz: **Dora** (feminina, português do Brasil) do modelo aberto **Kokoro-82M** (licença Apache-2.0).
   Também há duas vozes masculinas: `VOZ=pm_alex` ou `VOZ=pm_santa`.
 - O roteiro e a pronúncia de cada fala estão em `narracao.py` (lista `FALAS`). Para mudar uma fala,
   troque o texto e os fonemas e ajuste o horário de início.
-- O modelo (92 MB) não fica no repositório. Para baixá-lo:
+- Usa o modelo **completo** (fp32, 326 MB), que soa bem mais natural que a versão comprimida.
+  Ele não fica no repositório. Para baixá-lo:
 
 ```bash
 cd promo/unlock/assets/vozes
-npm pack kokoro-q8-shards@1.0.0 && tar xzf kokoro-q8-shards-1.0.0.tgz
-cat package/kokoro-q8.part{0..5}.bin > kokoro-q8.onnx && rm -r package kokoro-q8-shards-1.0.0.tgz
+for p in a b c; do npm pack kokoro-fp32$p-shards@1.0.0 && tar xzf kokoro-fp32$p-shards-1.0.0.tgz && mv package/*.bin . && rm -r package kokoro-fp32$p-shards-1.0.0.tgz; done
+for i in $(seq 0 18); do cat kokoro-fp32.part$i.bin; done > kokoro-fp32.onnx && rm kokoro-fp32.part*.bin
 ```
 
 ## Roteiro
