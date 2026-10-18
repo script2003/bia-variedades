@@ -67,6 +67,11 @@
     <!-- hides the on-screen keyboard while typing: only the typed text is shown -->
     <div id="noKb" class="abs" style="left:0;top:1380px;width:1080px;height:1020px;background:#121212;display:none"></div>
 
+    <!-- touch ripple on the real "Abrir" button -->
+    <div id="openBtn" class="abs" style="left:558px;top:857px;width:486px;height:120px;border-radius:60px;overflow:hidden;display:none">
+      <div id="openRipple" class="abs" style="width:300px;height:300px;margin:-150px 0 0 -150px;border-radius:50%;background:rgba(5,43,110,.22);left:242px;top:60px"></div>
+    </div>
+
     <div id="flash" class="flash"></div>
     <div id="ring" class="ring"></div>
     <svg id="cursor" viewBox="0 0 32 42"><path d="M3 2 L3 32 L10.5 25.5 L15.5 37 L21 34.5 L16 23.5 L26 23.5 Z" fill="#fff" stroke="#111" stroke-width="2.2" stroke-linejoin="round"/></svg>
@@ -81,10 +86,16 @@ const TX = window.TEXTOS, FR = 30;
 const NA = 357, NB = 159;        // frames extracted at 30 fps
 const FREEZE = 0.9;              // first frame held while the mouse comes in
 const CUT = 8.5;                 // recording-1 time where the app page opens (after the click on the result)
-const S0 = FREEZE + CUT;         // install simulation starts
+// the typing part of recording 1 plays faster
+const TYPE_A = 2.45, TYPE_B = 6.95, TYPE_SPEED = 2;
+const TYPE_OUT = (TYPE_B - TYPE_A) / TYPE_SPEED, SAVED = (TYPE_B - TYPE_A) - TYPE_OUT;
+const outOf = rec => FREEZE + (rec < TYPE_A ? rec : rec < TYPE_B ? TYPE_A + (rec - TYPE_A) / TYPE_SPEED : rec - SAVED);
+const recOf = t => { const r = t - FREEZE; return r < TYPE_A ? r : r < TYPE_A + TYPE_OUT ? TYPE_A + (r - TYPE_A) * TYPE_SPEED : r + SAVED; };
+const S0 = outOf(CUT);           // install simulation starts
 const SIM = 4.35;
 const B0 = S0 + SIM;             // real installed page (recording 2)
-const DUR = B0 + NB / FR;
+const ABRIR = B0 + 1.0;          // the mouse clicks "Abrir"
+const DUR = ABRIR + 1.1;         // and the video ends right after
 const $ = id => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const prog = (t, a, b) => clamp((t - a) / (b - a));
@@ -98,26 +109,27 @@ const outCubic = x => 1 - Math.pow(1 - x, 3);
 const TYPED = [["a", 2.567], ["l", 2.933], ["p", 3.2], ["h", 3.433], ["a", 3.667], [" ", 4.167], ["m", 4.567], ["o", 4.867], ["u", 5.133],
   ["s", 5.4], ["e", 5.633], [" ", 6.167], ["p", 6.533], ["r", 6.7], ["o", 6.867]];
 const CLICKS = [
-  [FREEZE + 0.12, 540, 2232, "mouse"],   // "Pesquisa" tab
-  [FREEZE + 1.28, 380, 168, "mouse"],    // search bar
-  [FREEZE + 7.3, 330, 330, "mouse"],     // first suggestion "alpha mouse pro" (opens the results)
-  [FREEZE + 8.3, 430, 575, "mouse"],     // the Alpha Mouse Pro result
-  [S0 + 1.0, 560, 916, "mouse"],         // Instalar
+  [outOf(0.12), 540, 2232, "mouse"],    // "Pesquisa" tab
+  [outOf(1.28), 380, 168, "mouse"],     // search bar
+  [outOf(7.3), 330, 330, "mouse"],      // first suggestion "alpha mouse pro" (opens the results)
+  [outOf(8.3), 430, 575, "mouse"],      // the Alpha Mouse Pro result
+  [S0 + 1.0, 560, 916, "mouse"],        // Instalar
+  [ABRIR, 800, 916, "mouse"],           // Abrir
 ];
 // read by the sound script (sons.py): mouse clicks + one key sound per typed letter
 window.CLICKS = [...CLICKS.map(c => ({ t: c[0], x: c[1], kind: c[3] })),
-  ...TYPED.map(([c, t]) => ({ t: FREEZE + t - 0.02, x: 540, kind: c === " " ? "space" : "key" }))].sort((a, b) => a.t - b.t);
+  ...TYPED.map(([c, t]) => ({ t: outOf(t) - 0.02, x: 540, kind: c === " " ? "space" : "key" }))].sort((a, b) => a.t - b.t);
 
 // mouse path: arrive a little before each click, rest briefly, then glide to the next
 const PATH = [[0, 780, 1640]];
-const WAIT = [[FREEZE + 2.2, 640, 300], [FREEZE + 6.9, 690, 285]];   // rests beside the field while typing
-for (const [t, x, y] of [...CLICKS.slice(0, 2), ...WAIT.map(w => [w[0] + 0.05, w[1], w[2], "wait"]), ...CLICKS.slice(2)].sort((a, b) => a[0] - b[0])) {
+// resting points: beside the field while typing, and beside the title while it installs
+const WAIT = [[outOf(2.2), 640, 300], [outOf(6.9), 690, 285], [S0 + 2.2, 740, 780]];
+for (const [t, x, y] of [...CLICKS, ...WAIT.map(w => [w[0] + 0.05, w[1], w[2], "wait"])].sort((a, b) => a[0] - b[0])) {
   const prev = PATH[PATH.length - 1];
   const travel = Math.min(1.0, Math.max(0.16, (t - prev[0]) * 0.85));
   PATH.push([Math.max(prev[0] + 0.02, t - 0.05 - 0 * travel), x, y, t - 0.05 - travel]);
   PATH.push([t + 0.06, x, y]);
 }
-PATH.push([S0 + 2.2, 740, 780, S0 + 1.3]);
 function mouse(t) {
   for (let i = 1; i < PATH.length; i++) {
     const [t1, x1, y1, start] = PATH[i];
@@ -205,7 +217,7 @@ async function renderAt(t) {
   t = clamp(t, 0, DUR - 1e-6);
   const loads = [];
   let f, rec = -1;
-  if (t < S0) { rec = Math.max(0, t - FREEZE); f = "frames/a_" + String(clamp(Math.floor(rec * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg"; }
+  if (t < S0) { rec = Math.max(0, recOf(t)); f = "frames/a_" + String(clamp(Math.floor(rec * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg"; }
   else if (t < B0) f = "frames/b_0001.jpg";
   else f = "frames/b_" + String(clamp(Math.floor((t - B0) * FR) + 1, 1, NB)).padStart(4, "0") + ".jpg";
   setSrc($("img"), f, loads);
@@ -216,6 +228,10 @@ async function renderAt(t) {
   if (res) { setSrc($("imgList"), f, loads); setSrc($("imgRow"), f, loads); $("rowContent").style.opacity = prog(rec, 7.55, 7.72).toFixed(3); }
   $("scr").style.transform = `translateY(${(-cam(t)).toFixed(1)}px)`;
   sim(t - S0);
+  const ro = prog(t, ABRIR, ABRIR + 0.4);
+  $("openBtn").style.display = ro > 0 ? "block" : "none";
+  $("openRipple").style.transform = `scale(${(0.2 + ro * 4).toFixed(3)})`;
+  $("openRipple").style.opacity = (ro < 1 ? 1 - ro * 0.6 : Math.max(0, 0.4 - (t - ABRIR - 0.4) * 2)).toFixed(3);
   const press = clickFx(t);
   const [mx, my] = mouse(t);
   $("cursor").style.transform = `translate(${(mx - 4).toFixed(1)}px, ${(my - 3).toFixed(1)}px) scale(${(1 - 0.16 * press).toFixed(3)})`;
