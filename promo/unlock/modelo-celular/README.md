@@ -1,13 +1,8 @@
 # Modelo: celular com tela verde + fundo de grade
 
 `output/modelo-celular-tela-verde.mp4`: 9:16 (1080 × 1920), 30 fps, 30 s, sem som, loop perfeito.
-Fundo preto com grade branca em perspectiva no teto, que se afasta devagar (1ª referência), e piso
-preto brilhante com azulejos fracos (2ª referência). O celular prateado fica parado no centro, apoiado
-no piso, com o reflexo dele logo abaixo, que vai sumindo. No reflexo a tela aparece como vidro escuro,
-para o modelo continuar funcionando com a remoção de croma.
-Detalhes de realismo: grade do teto com linhas que afinam com a distância, brilho suave e névoa no horizonte; metal iluminado de cima, brilho nas laterais, chanfro polido, linhas de antena,
-botões com volume, borda do vidro pegando luz, câmera frontal em furo com reflexo de lente e sombra
-de contato no piso. A tela é verde puro (#00FF00).
+Fundo preto com grade branca em perspectiva (em cima e embaixo) que se afasta devagar, e celular
+prateado parado no centro, igual ao vídeo de referência. A tela é verde puro (#00FF00).
 `output/previa.png` mostra um quadro.
 
 Área da tela verde (para encaixar o vídeo): x 224 a 856, y 278 a 1640 (632 × 1362 px), cantos
@@ -29,4 +24,4 @@ sobra.
 cd promo/unlock/modelo-celular
 NODE_PATH=$(npm root -g) node render.cjs
 ```
-Cores e medidas ficam em `index.html` (`GREEN`, `PH`, `CEIL`, `FLOOR`, `STEP`, `LINE_EVERY`).
+Cores e medidas ficam em `index.html` (`GREEN`, `PH`, `PLANES`, `STEP`, `LINE_EVERY`).

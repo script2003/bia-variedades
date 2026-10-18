@@ -14,159 +14,87 @@
 (() => {
 "use strict";
 const W = 1080, H = 1920, DUR = 30;
+const SPEED = 0.4;              // grid units per second (30 s × 0.4 = 12 units → seamless loop)
 const GREEN = "#00ff00";        // chroma-key screen
 const ctx = document.getElementById("c").getContext("2d");
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
-const layer = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c; };
 
-// ---------- ceiling: animated white perspective grid (first reference) ----------
-// y = horizon − K / z (z = 1 at the top edge); the horizon is far, so only a band shows and fades out.
-const STEP = 0.15, LINE_EVERY = 2.5;   // one line passes every 2.5 s → seamless 30 s loop
-const CEIL = { hor: 420, K: 420, S: 347, bandEnd: 205 };
-function ceiling(t) {
-  const phase = (t / LINE_EVERY) % 1, p = CEIL;
-  const fade = y => clamp((p.bandEnd - y) / 70);
-  // lines across: thicker and brighter close to the camera, thin and dim far away
-  for (let n = 0; n < 40; n++) {
-    const z = 1 - STEP + (n + phase) * STEP, y = p.hor - p.K / z;
-    if (y < -6 || y > p.bandEnd) continue;
-    const near = clamp(1.6 - z), a = fade(y) * (0.5 + 0.5 * near);
-    bloomLine(0, y, W, y, 1.2 + 3.4 * near, a);
+// ---------- perspective grid (ceiling and floor), matched to the reference ----------
+// Each plane: y = horizon ± K / z (z = 1 at the screen edge). The horizon is far away, so only the
+// near part shows as a band at the top and bottom that fades into black. Lines recede toward it.
+const STEP = 0.15, LINE_EVERY = 2.5;   // grid spacing in z; one line passes every 2.5 s (loops in 30 s)
+const PLANES = [
+  { hor: 420, K: 420, S: 347, dir: -1, bandEnd: 205 },     // ceiling (band from the top down to y≈205)
+  { hor: 1500, K: 420, S: 253, dir: 1, bandEnd: 1715 },    // floor (band from y≈1715 down to the bottom)
+];
+function grid(t) {
+  const phase = (t / LINE_EVERY) % 1;
+  for (const p of PLANES) {
+    const edge = p.dir > 0 ? H : 0;
+    const fade = y => clamp((p.dir > 0 ? y - p.bandEnd : p.bandEnd - y) / 60);
+    // lines across, receding toward the horizon
+    for (let n = 0; n < 40; n++) {
+      const z = 1 - STEP + (n + phase) * STEP;
+      const y = p.hor + p.dir * p.K / z;
+      if ((p.dir > 0 && (y > H + 6 || y < p.bandEnd)) || (p.dir < 0 && (y < -6 || y > p.bandEnd))) continue;
+      const near = clamp(1.6 - z);
+      line(0, y, W, y, 1.8 + 2.8 * near, fade(y) * (0.6 + 0.4 * near));
+    }
+    // lines along, pointing to the (off-band) vanishing point
+    const g = ctx.createLinearGradient(0, p.bandEnd, 0, edge);
+    g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.35, "rgba(255,255,255,.7)"); g.addColorStop(1, "rgba(255,255,255,1)");
+    for (let k = -8; k < 8; k++) {
+      const xAt = y => W / 2 + (k + 0.5) * p.S * (Math.abs(p.hor - y) / p.K);
+      glowLine(xAt(p.bandEnd), p.bandEnd, xAt(edge), edge, 3.0, g);
+    }
   }
-  // lines along: tapered quads, wide at the top edge and fine toward the horizon
-  for (let k = -8; k < 8; k++) {
-    const xAt = y => W / 2 + (k + 0.5) * p.S * ((p.hor - y) / p.K);
-    const g = ctx.createLinearGradient(0, p.bandEnd, 0, 0);
-    g.addColorStop(0, "rgba(232,240,255,0)"); g.addColorStop(0.3, "rgba(232,240,255,.55)"); g.addColorStop(1, "rgba(240,245,255,1)");
-    const x0 = xAt(p.bandEnd), x1 = xAt(0), w0 = 0.6, w1 = 2.4;
-    ctx.save(); ctx.shadowColor = "rgba(210,225,255,.6)"; ctx.shadowBlur = 12; ctx.fillStyle = g;
-    ctx.beginPath(); ctx.moveTo(x0 - w0, p.bandEnd); ctx.lineTo(x0 + w0, p.bandEnd); ctx.lineTo(x1 + w1, 0); ctx.lineTo(x1 - w1, 0); ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
-  // atmospheric haze where the grid meets the dark (it hides the far end, like a real room)
-  const hz = ctx.createLinearGradient(0, p.bandEnd - 90, 0, p.bandEnd + 30);
-  hz.addColorStop(0, "rgba(0,0,0,0)"); hz.addColorStop(0.55, "rgba(18,20,26,.55)"); hz.addColorStop(0.8, "rgba(10,11,14,.35)"); hz.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = hz; ctx.fillRect(0, p.bandEnd - 90, W, 120);
 }
-// soft bloom (wide, faint) under a crisp core, slightly cool white
-function bloomLine(x0, y0, x1, y1, w, a) {
+function line(x0, y0, x1, y1, w, a) {
   if (a <= 0.01) return;
-  ctx.save(); ctx.lineCap = "round";
-  ctx.strokeStyle = `rgba(200,215,255,${(a * 0.18).toFixed(3)})`; ctx.lineWidth = w * 5; ctx.filter = "blur(3px)";
-  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.filter = "none";
-  ctx.strokeStyle = `rgba(240,245,255,${a.toFixed(3)})`; ctx.lineWidth = w; ctx.shadowColor = "rgba(220,230,255,.5)"; ctx.shadowBlur = 6;
-  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+  glowLine(x0, y0, x1, y1, w, `rgba(255,255,255,${a.toFixed(3)})`);
 }
-function glowLine(x0, y0, x1, y1, w, style, c = ctx, glow = 10) {
-  c.save(); c.strokeStyle = style; c.lineCap = "round";
-  c.shadowColor = "rgba(255,255,255,.55)"; c.shadowBlur = glow; c.lineWidth = w;
-  c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.restore();
+function glowLine(x0, y0, x1, y1, w, style) {
+  ctx.save();
+  ctx.strokeStyle = style; ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(255,255,255,.55)"; ctx.shadowBlur = 10;
+  ctx.lineWidth = w;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.restore();
 }
 
-// ---------- phone (static, drawn once) ----------
+// ---------- phone: silver frame, black bezel, green screen ----------
 const PH = { x: 186, y: 240, w: 708, h: 1438, r: 100 };
-const BASE = PH.y + PH.h;   // where the phone stands on the floor
-function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
-function drawPhone(c, screen) {
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function metal(x0, x1) {
+  const g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, "#8d8f93"); g.addColorStop(0.012, "#f4f5f7"); g.addColorStop(0.03, "#b9bbbf");
+  g.addColorStop(0.5, "#d6d8db"); g.addColorStop(0.97, "#b9bbbf"); g.addColorStop(0.988, "#f4f5f7"); g.addColorStop(1, "#8d8f93");
+  return g;
+}
+function phone() {
   const { x, y, w, h, r } = PH;
-  // side buttons, lit from above
-  for (const [bx, by, bw, bh] of [[x - 7, 437, 10, 45], [x - 7, 538, 10, 96], [x - 7, 671, 10, 96], [x + w - 3, 576, 10, 153]]) {
-    const g = c.createLinearGradient(0, by, 0, by + bh);
-    g.addColorStop(0, "#d4d7db"); g.addColorStop(0.5, "#8e9298"); g.addColorStop(1, "#5d6166");
-    c.fillStyle = g; rr(c, bx, by, bw, bh, 4); c.fill();
-    c.fillStyle = "rgba(255,255,255,.55)"; rr(c, bx + (bx < x ? 1 : bw - 3), by + 3, 2, bh - 6, 1); c.fill();
+  // side buttons (left: action + volume, right: power): dark metal with a light edge
+  for (const [bx, by, bw, bh] of [[x - 7, 437, 9, 45], [x - 7, 538, 9, 96], [x - 7, 671, 9, 96], [x + w - 2, 576, 9, 153]]) {
+    ctx.fillStyle = "#6e7074"; rr(bx, by, bw, bh, 4); ctx.fill();
+    ctx.fillStyle = "#c9cbcf"; rr(bx + (bx < x ? 0 : bw - 3), by + 2, 3, bh - 4, 2); ctx.fill();
   }
-  // frame body: light from the top, darker toward the floor
-  let g = c.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, "#e4e6e9"); g.addColorStop(0.08, "#b9bdc2"); g.addColorStop(0.5, "#9a9ea4"); g.addColorStop(0.92, "#73777d"); g.addColorStop(1, "#c7cacf");
-  c.fillStyle = g; rr(c, x, y, w, h, r); c.fill();
-  // vertical sheen on the left and right edges
-  g = c.createLinearGradient(x, 0, x + w, 0);
-  g.addColorStop(0, "rgba(255,255,255,.0)"); g.addColorStop(0.006, "rgba(255,255,255,.75)"); g.addColorStop(0.02, "rgba(255,255,255,0)");
-  g.addColorStop(0.98, "rgba(255,255,255,0)"); g.addColorStop(0.994, "rgba(255,255,255,.6)"); g.addColorStop(1, "rgba(255,255,255,0)");
-  c.fillStyle = g; rr(c, x, y, w, h, r); c.fill();
-  // dark chamfer, then the polished inner bevel
-  c.fillStyle = "#26282b"; rr(c, x + 5, y + 5, w - 10, h - 10, r - 5); c.fill();
-  g = c.createLinearGradient(0, y + 9, 0, y + h - 9);
-  g.addColorStop(0, "#f4f5f7"); g.addColorStop(0.15, "#c8cbcf"); g.addColorStop(0.6, "#a3a7ad"); g.addColorStop(1, "#d9dbde");
-  c.fillStyle = g; rr(c, x + 9, y + 9, w - 18, h - 18, r - 9); c.fill();
-  // antenna lines
-  c.fillStyle = "#3a3c40";
-  for (const [ax, ay, aw, ah] of [[x + 150, y, 6, 12], [x + w - 156, y, 6, 12], [x + 150, y + h - 12, 6, 12], [x + w - 156, y + h - 12, 6, 12],
-    [x, y + 150, 12, 6], [x + w - 12, y + 150, 12, 6], [x, y + h - 156, 12, 6], [x + w - 12, y + h - 156, 12, 6]]) c.fillRect(ax, ay, aw, ah);
-  // glass: black bezel with its edge catching the light
-  c.fillStyle = "#020203"; rr(c, x + 19, y + 19, w - 38, h - 38, r - 19); c.fill();
-  c.strokeStyle = "rgba(255,255,255,.16)"; c.lineWidth = 1.5; rr(c, x + 19.5, y + 19.5, w - 39, h - 39, r - 19); c.stroke();
-  // screen
-  if (screen === "green") { c.fillStyle = GREEN; rr(c, x + 38, y + 38, w - 76, h - 76, r - 36); c.fill(); }
-  else {
-    g = c.createLinearGradient(x, y, x + w, y + h);
-    g.addColorStop(0, "#0b0c10"); g.addColorStop(0.45, "#050507"); g.addColorStop(0.55, "#101218"); g.addColorStop(1, "#040405");
-    c.fillStyle = g; rr(c, x + 38, y + 38, w - 76, h - 76, r - 36); c.fill();
-  }
-  // front camera: punch hole with a lens glint
-  const cx = x + w / 2, cy = y + 66;
-  c.fillStyle = "#000"; c.beginPath(); c.arc(cx, cy, 14, 0, 7); c.fill();
-  c.strokeStyle = "#1c1d21"; c.lineWidth = 2; c.beginPath(); c.arc(cx, cy, 12, 0, 7); c.stroke();
-  g = c.createRadialGradient(cx - 3, cy - 3, 0, cx, cy, 9); g.addColorStop(0, "rgba(90,110,170,.9)"); g.addColorStop(1, "rgba(20,25,45,0)");
-  c.fillStyle = g; c.beginPath(); c.arc(cx, cy, 8, 0, 7); c.fill();
+  // stainless band: dark, with a thin bright line on the outside and another on the inside
+  ctx.fillStyle = "#d9dbde"; rr(x, y, w, h, r); ctx.fill();                       // outer bright line
+  ctx.fillStyle = "#2a2b2d"; rr(x + 4, y + 4, w - 8, h - 8, r - 4); ctx.fill();   // dark middle
+  ctx.fillStyle = metal(x + 11, x + w - 11); rr(x + 11, y + 11, w - 22, h - 22, r - 11); ctx.fill();  // inner bright line
+  // black glass bezel
+  ctx.fillStyle = "#030303"; rr(x + 20, y + 20, w - 40, h - 40, r - 20); ctx.fill();
+  // green screen (put your video here with chroma key)
+  ctx.fillStyle = GREEN; rr(x + 38, y + 38, w - 76, h - 76, r - 36); ctx.fill();
+  // tiny front sensors, like the reference
+  ctx.fillStyle = "#1b1b1d";
+  for (const cx of [606, 616]) { ctx.beginPath(); ctx.arc(cx, y + 50, 2.6, 0, 7); ctx.fill(); }
 }
-
-// ---------- glossy dark floor with faint tiles (second reference), static ----------
-const FLOOR = { hor: 1480, K: 440, S: 300, top: 1560 };   // y = hor + K / z, z = 1 at the bottom edge
-function drawFloor(c) {
-  let g = c.createLinearGradient(0, FLOOR.top, 0, H);
-  g.addColorStop(0, "rgba(10,10,12,0)"); g.addColorStop(0.25, "#0a0a0c"); g.addColorStop(1, "#141417");
-  c.fillStyle = g; c.fillRect(0, FLOOR.top, W, H - FLOOR.top);
-  // soft pool of light on the glossy floor around the phone
-  g = c.createRadialGradient(W / 2, BASE + 40, 20, W / 2, BASE + 40, 620);
-  g.addColorStop(0, "rgba(255,255,255,.07)"); g.addColorStop(1, "rgba(255,255,255,0)");
-  c.fillStyle = g; c.fillRect(0, FLOOR.top, W, H - FLOOR.top);
-  const fade = y => clamp((y - FLOOR.top) / 120);
-  for (let n = 0; n < 30; n++) {
-    const z = 1 + n * 0.32, y = FLOOR.hor + FLOOR.K / z;
-    if (y < FLOOR.top) break;
-    glowLine(0, y, W, y, 1.6, `rgba(255,255,255,${(0.13 * fade(y)).toFixed(3)})`, c, 0);
-  }
-  g = c.createLinearGradient(0, FLOOR.top, 0, H);
-  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,.15)");
-  for (let k = -6; k < 6; k++) {
-    const xAt = y => W / 2 + (k + 0.5) * FLOOR.S * ((y - FLOOR.hor) / FLOOR.K);
-    glowLine(xAt(FLOOR.top), FLOOR.top, xAt(H), H, 1.6, g, c, 0);
-  }
-}
-
-// ---------- reflection: the phone mirrored under its base, dark screen, fading out ----------
-function drawReflection(c) {
-  const ph = layer(); drawPhone(ph.getContext("2d"), "dark");
-  const r = layer(), rc = r.getContext("2d");
-  rc.save(); rc.translate(0, 2 * BASE); rc.scale(1, -1); rc.filter = "blur(1.5px)"; rc.drawImage(ph, 0, 0); rc.restore();
-  rc.globalCompositeOperation = "destination-in";
-  const g = rc.createLinearGradient(0, BASE, 0, BASE + 320);
-  g.addColorStop(0, "rgba(0,0,0,.72)"); g.addColorStop(0.45, "rgba(0,0,0,.28)"); g.addColorStop(1, "rgba(0,0,0,0)");
-  rc.fillStyle = g; rc.fillRect(0, BASE, W, H - BASE);
-  rc.clearRect(0, 0, W, BASE);
-  c.drawImage(r, 0, 0);
-}
-
-// static layers, built once
-const STATIC_BACK = layer(), STATIC_FRONT = layer();
-(() => {
-  const b = STATIC_BACK.getContext("2d");
-  drawFloor(b); drawReflection(b);
-  // contact shadow where the phone touches the floor
-  const g = b.createRadialGradient(W / 2, BASE + 4, 10, W / 2, BASE + 4, 380);
-  g.addColorStop(0, "rgba(0,0,0,.85)"); g.addColorStop(1, "rgba(0,0,0,0)");
-  b.save(); b.translate(W / 2, BASE + 4); b.scale(1, 0.06); b.translate(-W / 2, -(BASE + 4));
-  b.fillStyle = g; b.beginPath(); b.arc(W / 2, BASE + 4, 380, 0, 7); b.fill(); b.restore();
-  drawPhone(STATIC_FRONT.getContext("2d"), "green");
-})();
 
 function renderAt(t) {
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-  ceiling(t);
-  ctx.drawImage(STATIC_BACK, 0, 0);
-  ctx.drawImage(STATIC_FRONT, 0, 0);
+  grid(t);
+  phone();
 }
 window.DURATION = DUR;
 window.renderAt = t => { renderAt(t); return true; };
