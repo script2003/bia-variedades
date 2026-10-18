@@ -6,46 +6,21 @@
 <style>
   @font-face { font-family: Pop; font-weight: 400; src: url(../assets/fonts/poppins-latin-400-normal.woff2) format("woff2"); }
   @font-face { font-family: Pop; font-weight: 500; src: url(../assets/fonts/poppins-latin-500-normal.woff2) format("woff2"); }
-  @font-face { font-family: Pop; font-weight: 600; src: url(../assets/fonts/poppins-latin-600-normal.woff2) format("woff2"); }
-  @font-face { font-family: Pop; font-weight: 700; src: url(../assets/fonts/poppins-latin-700-normal.woff2) format("woff2"); }
-  @font-face { font-family: Pop; font-weight: 800; src: url(../assets/fonts/poppins-latin-800-normal.woff2) format("woff2"); }
   html, body { margin: 0; background: #000; overflow: hidden; }
-  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; font-family: Pop, sans-serif;
-    background: radial-gradient(1200px 900px at 50% 30%, #2a1257 0%, #120a24 55%, #07050d 100%); }
+  /* 9:16 window over the 1080 × 2400 recording, at real size (no zoom) */
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #121212; font-family: Pop, sans-serif; }
+  #scr { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
+  #scr > img { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
   .abs { position: absolute; }
-  /* phone screen in source pixels (1080 × 2400), moved by the camera transform */
-  .scr { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; transform-origin: 0 0; border-radius: 64px; overflow: hidden;
-    box-shadow: 0 0 0 6px #1d1730, 0 60px 160px rgba(0,0,0,.7), 0 0 120px rgba(124,58,237,.35); background: #121212; }
-  .scr > img { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
-  .tap { position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; display: none;
-    background: rgba(255,255,255,.42); box-shadow: 0 0 0 4px rgba(255,255,255,.7); }
-  /* install simulation, drawn over the real app page (coordinates measured on the recording) */
   #mock { position: absolute; inset: 0; display: none; }
   .mask { -webkit-mask-repeat: no-repeat; -webkit-mask-position: center; mask-repeat: no-repeat; mask-position: center; }
-  .cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; }
-  .pill { display: flex; align-items: center; gap: 26px; padding: 22px 46px 22px 22px; border-radius: 999px; background: #7c3aed; color: #fff;
-    font: 700 50px Pop; box-shadow: 0 20px 60px rgba(0,0,0,.45); white-space: nowrap; }
-  .num { width: 84px; height: 84px; border-radius: 50%; background: #fff; color: #6d28d9; display: grid; place-items: center; font: 800 48px Pop; }
-  .num svg { width: 50px; height: 50px; }
-  .center { left: 0; right: 0; text-align: center; }
 </style>
 </head>
 <body>
 <div id="stage">
-  <!-- intro / end -->
-  <div id="intro" class="abs" style="inset:0">
-    <img id="introIcon" class="abs" src="assets/icone-app.png" style="left:410px;top:560px;width:260px;height:260px;border-radius:62px;box-shadow:0 0 0 4px rgba(167,139,250,.5),0 30px 90px rgba(124,58,237,.6)">
-    <div id="introA" class="abs center" style="top:880px;font:500 58px Pop;color:#d6ccf5"></div>
-    <div id="introB" class="abs center" style="top:950px;font:800 112px Pop;color:#fff;letter-spacing:-2px"></div>
-    <div id="introC" class="abs center" style="top:1090px;font:600 54px Pop;color:#a78bfa"></div>
-  </div>
-
-  <div id="scrA" class="scr"><img id="imgA" alt="">
-    <div id="tapA" class="tap"></div>
-  </div>
-  <div id="scrB" class="scr"><img id="imgB" alt="">
+  <div id="scr"><img id="img" alt="">
+    <!-- install simulation over the real app page (the recording starts with the app already installed) -->
     <div id="mock">
-      <!-- covers for the real "Desinstalar | Abrir" buttons and the icon -->
       <div class="abs" style="left:28px;top:848px;width:1030px;height:138px;background:#121212"></div>
       <div class="abs" style="left:28px;top:280px;width:234px;height:232px;background:#121212"></div>
       <img id="mIcon" class="abs" src="assets/icone-app.png" style="left:36px;top:287px;width:217px;height:216px;border-radius:50px;transform-origin:108px 108px">
@@ -54,190 +29,94 @@
         <circle id="mArc" cx="120" cy="120" r="112" fill="none" stroke="#a8c4f7" stroke-width="7" stroke-linecap="round" transform="rotate(-90 120 120)" stroke-dasharray="0 704"/>
       </svg>
       <div id="mStatus" class="abs" style="left:326px;top:548px;font:400 38px Pop;color:#c4c7c5"></div>
-      <!-- not installed: one full-width button, letters taken from the Play Store's own font -->
       <div id="mInstall" class="abs" style="left:36px;top:857px;width:1008px;height:120px;border-radius:60px;background:#a8c4f7;overflow:hidden">
         <div class="abs mask" style="inset:0;background:#052b6e;-webkit-mask-image:url(assets/txt-instalar.png);mask-image:url(assets/txt-instalar.png)"></div>
         <div id="mRipple" class="abs" style="width:300px;height:300px;margin:-150px 0 0 -150px;border-radius:50%;background:rgba(5,43,110,.18);left:504px;top:60px;transform:scale(0)"></div>
       </div>
-      <!-- downloading: Cancelar | Abrir (disabled) -->
       <div id="mBusy" class="abs" style="inset:0;display:none">
-        <div class="abs" style="left:36px;top:857px;width:485px;height:120px;border-radius:60px;box-sizing:border-box;border:3px solid #434545;display:grid;place-items:center;font:500 43px Pop;color:#a8c4f7" id="mCancel"></div>
+        <div id="mCancel" class="abs" style="left:36px;top:857px;width:485px;height:120px;border-radius:60px;box-sizing:border-box;border:3px solid #434545;display:grid;place-items:center;font:500 43px Pop;color:#a8c4f7"></div>
         <div class="abs" style="left:558px;top:857px;width:486px;height:120px;border-radius:60px;background:rgba(227,227,227,.12)">
           <div class="abs mask" style="inset:0;background:rgba(227,227,227,.38);-webkit-mask-image:url(assets/txt-abrir.png);mask-image:url(assets/txt-abrir.png)"></div>
         </div>
       </div>
     </div>
-    <div id="tapB" class="tap"></div>
   </div>
-
-  <div id="cap" class="cap"><div class="pill"><div class="num" id="capNum"></div><span id="capTxt"></span></div></div>
-
-  <div id="end" class="abs" style="inset:0;display:none">
-    <img id="endIcon" class="abs" src="assets/icone-app.png" style="left:420px;top:620px;width:240px;height:240px;border-radius:58px;box-shadow:0 0 0 4px rgba(167,139,250,.5),0 30px 90px rgba(124,58,237,.6)">
-    <div id="endA" class="abs center" style="top:900px;font:800 104px Pop;color:#fff;letter-spacing:-2px"></div>
-    <div id="endB" class="abs center" style="top:1030px;font:600 52px Pop;color:#c4b5fd"></div>
-    <div id="endC" class="abs center" style="top:1105px;font:500 40px Pop;color:#8f86b3"></div>
-  </div>
-  <div id="fade" class="abs" style="inset:0;background:#000;opacity:0;pointer-events:none"></div>
 </div>
 
 <script src="textos.js"></script>
 <script>
 (() => {
 "use strict";
-const TX = window.TEXTOS, DUR = 16, FR = 30;
-const NA = 357, NB = 159; // frames extracted at 30 fps
+const TX = window.TEXTOS, FR = 30;
+const NA = 357, NB = 159;                 // frames extracted at 30 fps
+const A_END = NA / FR;                     // recording 1: Play Store, search, results (real speed)
+const SIM = 4.35;                          // install simulation on the app page
+const B0 = A_END + SIM;                    // recording 2: installed page (real speed)
+const DUR = B0 + NB / FR;
 const $ = id => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const prog = (t, a, b) => clamp((t - a) / (b - a));
 const lerp = (a, b, k) => a + (b - a) * k;
-const E = {
-  lin: x => x, inOutSine: x => -(Math.cos(Math.PI * x) - 1) / 2, outCubic: x => 1 - Math.pow(1 - x, 3), inCubic: x => x * x * x,
-  inOutCubic: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
-  outExpo: x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x),
-  outBack: x => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
-};
+const ease = x => -(Math.cos(Math.PI * x) - 1) / 2;
+const outCubic = x => 1 - Math.pow(1 - x, 3);
 function track(keys, t) {
   if (t <= keys[0][0]) return keys[0][1];
   for (let i = 1; i < keys.length; i++) {
-    const [t1, v1, e] = keys[i];
-    if (t <= t1) { const [t0, v0] = keys[i - 1]; return lerp(v0, v1, E[e || "inOutCubic"](prog(t, t0, t1))); }
+    if (t <= keys[i][0]) { const [t0, v0] = keys[i - 1], [t1, v1] = keys[i]; return lerp(v0, v1, ease(prog(t, t0, t1))); }
   }
   return keys[keys.length - 1][1];
 }
 
-// ---- which recording frame is on screen (output time -> recording time) ----
-function timeA(t) {
-  if (t < 2.4) return 0;                                   // hold on the Play Store home
-  if (t < 3.8) return t - 2.4;                              // tap "Pesquisa", tap the search bar
-  if (t < 4.4) return 1.4 + (t - 3.8);                      // search screen + keyboard opens
-  if (t < 7.5) return 2.0 + (t - 4.4) * (5.1 / 3.1);        // typing, sped up 1.65x
-  return Math.min(7.32, 7.1 + (t - 7.5) * 0.5);             // "alpha mouse pro" typed
-}
-const timeB = t => t < 12.45 ? 0 : Math.min(5.25, t - 12.45);
-const frameA = t => "frames/a_" + String(clamp(Math.round(timeA(t) * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg";
-const frameB = t => "frames/b_" + String(clamp(Math.round(timeB(t) * FR) + 1, 1, NB)).padStart(4, "0") + ".jpg";
+// camera: how far the 1920-px window is moved down the 2400-px screen (0 = top, 480 = bottom),
+// following where the action is in recording 1
+const CAM_A = [
+  [0.00, 480],  // Play Store home: bottom, where "Pesquisa" is tapped
+  [0.35, 480], [1.20, 0],    // up to the search bar
+  [1.85, 0], [2.30, 130],    // keyboard opens: search field + keyboard
+  [7.05, 130], [7.30, 480],  // down to the search key
+  [7.50, 480], [7.90, 0],    // results list from the top
+];
 
-// ---- camera: scale s, and the source point (fx, fy) that lands on the output centre ----
-function camA(t) {
-  return {
-    s: track([[1.4, .7], [3.85, .7], [4.4, 1.2, "inOutCubic"]], t),
-    fx: track([[3.85, 540], [4.4, 510, "inOutCubic"]], t),
-    fy: track([[1.4, 1050], [3.85, 1050], [4.4, 750, "inOutCubic"]], t),
-    y: track([[1.35, 2300], [1.95, 0, "outExpo"]], t),            // slides up after the intro
-    x: track([[7.8, 0], [8.2, -1200, "inCubic"]], t),              // pushed left by the next page
-  };
-}
-function camB(t) {
-  return {
-    s: track([[7.9, 1.0], [14.0, 1.0], [14.6, .55, "inOutCubic"]], t),
-    fx: 540, fy: track([[7.9, 960], [14.0, 960], [14.6, 1200, "inOutCubic"]], t),
-    y: 0, x: track([[7.85, 1200], [8.3, 0, "outExpo"]], t),
-  };
-}
-function place(el, c) {
-  const ox = 540 - c.s * c.fx + c.x, oy = 960 - c.s * c.fy + c.y;
-  el.style.transform = `translate(${ox.toFixed(1)}px, ${oy.toFixed(1)}px) scale(${c.s.toFixed(4)})`;
-}
-
-// ---- touches: [time, screen, x, y] in recording pixels ----
-const TAPS = [[2.65, "A", 540, 2290], [3.72, "A", 360, 168], [7.65, "A", 300, 330], [9.2, "B", 540, 916]];
-function taps(t) {
-  for (const id of ["tapA", "tapB"]) $(id).style.display = "none";
-  for (const [at, scr, x, y] of TAPS) {
-    const k = prog(t, at - 0.12, at + 0.35);
-    if (k <= 0 || k >= 1) continue;
-    const el = $("tap" + scr);
-    el.style.display = "block"; el.style.left = x + "px"; el.style.top = y + "px";
-    const press = t < at ? E.outCubic(prog(t, at - 0.12, at)) : 1;
-    el.style.transform = `scale(${(0.6 + 0.4 * press + 0.5 * prog(t, at, at + 0.35)).toFixed(3)})`;
-    el.style.opacity = (t < at ? press : 1 - prog(t, at, at + 0.35)).toFixed(3);
-  }
-}
-
-// ---- install simulation over the real page ----
-function mock(t) {
-  const on = t >= 7.8 && t < 12.75;
+function sim(t) {  // t = seconds since the simulation started
+  const on = t >= 0 && t < SIM;
   $("mock").style.display = on ? "block" : "none";
   if (!on) return;
-  $("mock").style.opacity = (1 - prog(t, 12.45, 12.75)).toFixed(3);   // dissolve into the real installed page
-  const busy = t >= 9.32;
-  if ($("mCancel").textContent !== TX.cancelar) $("mCancel").textContent = TX.cancelar;
+  $("mock").style.opacity = (1 - prog(t, 4.1, 4.35)).toFixed(3);   // dissolves into the real installed page
+  const busy = t >= 1.1;
   $("mInstall").style.display = busy ? "none" : "block";
   $("mBusy").style.display = busy ? "block" : "none";
-  const r = prog(t, 9.2, 9.5);
+  if ($("mCancel").textContent !== TX.cancelar) $("mCancel").textContent = TX.cancelar;
+  const r = prog(t, 1.0, 1.3);   // touch ripple of the button
   $("mRipple").style.transform = `scale(${(r * 6).toFixed(3)})`; $("mRipple").style.opacity = (r > 0 ? 1 - r : 0).toFixed(3);
-  // icon shrinks into a progress ring while downloading
-  const ring = E.outCubic(prog(t, 9.3, 9.6)) * (1 - E.outCubic(prog(t, 12.2, 12.45)));
+  const ring = outCubic(prog(t, 1.1, 1.4)) * (1 - outCubic(prog(t, 3.85, 4.1)));
   $("mIcon").style.transform = `scale(${lerp(1, 0.72, ring).toFixed(4)})`;
   $("mIcon").style.borderRadius = lerp(50, 108, ring).toFixed(1) + "px";
   $("mRing").style.opacity = ring.toFixed(3);
-  const p = E.inOutSine(prog(t, 9.75, 11.75));
-  const spin = t < 9.75 || t > 11.8;   // "Pendente" / "Instalando": indeterminate arc
+  const p = ease(prog(t, 1.6, 3.5));
   const arc = $("mArc");
-  if (spin) { arc.setAttribute("stroke-dasharray", "150 554"); arc.setAttribute("transform", `rotate(${(-90 + t * 420) % 360} 120 120)`); }
+  if (t < 1.6 || t > 3.55) { arc.setAttribute("stroke-dasharray", "150 554"); arc.setAttribute("transform", `rotate(${(-90 + t * 420) % 360} 120 120)`); }
   else { arc.setAttribute("stroke-dasharray", `${(704 * p).toFixed(1)} 704`); arc.setAttribute("transform", "rotate(-90 120 120)"); }
   let st = "";
-  if (t >= 9.3 && t < 9.75) st = TX.pendente;
-  else if (t >= 9.75 && t < 11.8) st = Math.round(p * 100) + "%";
-  else if (t >= 11.8 && t < 12.45) st = TX.instalando;
+  if (t >= 1.1 && t < 1.6) st = TX.pendente;
+  else if (t >= 1.6 && t < 3.55) st = Math.round(p * 100) + "%";
+  else if (t >= 3.55 && t < 4.1) st = TX.instalando;
   $("mStatus").textContent = st;
-}
-
-// ---- captions ----
-const CAPS = [[1.75, 3.75, "1", TX.passo1, 80], [3.85, 7.85, "2", TX.passo2, 1660], [8.35, 12.4, "3", TX.passo3, 1660], [12.5, 13.95, "ok", TX.pronto, 1660]];
-const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-function caption(t) {
-  const c = CAPS.find(([a, b]) => t >= a && t < b);
-  const el = $("cap");
-  if (!c) { el.style.display = "none"; return; }
-  const [a, b, n, txt, top] = c;
-  el.style.display = "flex"; el.style.top = top + "px";
-  if (el._n !== n) { $("capNum").innerHTML = n === "ok" ? CHECK : n; $("capTxt").textContent = txt; el._n = n; }
-  const k = E.outBack(prog(t, a, a + 0.35)), q = E.inCubic(prog(t, b - 0.2, b));
-  el.style.transform = `translateY(${((1 - k) * 60 + q * 30).toFixed(1)}px) scale(${(lerp(.8, 1, k) * lerp(1, .9, q)).toFixed(3)})`;
-  el.style.opacity = (Math.min(1, k * 1.3) * (1 - q)).toFixed(3);
-}
-
-function word(el, text, t, at, dy = 50) {
-  if (el.textContent !== text) el.textContent = text;
-  const k = E.outExpo(prog(t, at, at + 0.5));
-  el.style.transform = `translateY(${((1 - k) * dy).toFixed(1)}px)`;
-  el.style.opacity = k.toFixed(3); el.style.filter = k < 1 ? `blur(${((1 - k) * 12).toFixed(1)}px)` : "none";
 }
 
 async function renderAt(t) {
   t = clamp(t, 0, DUR - 1e-6);
-  // intro
-  const io = 1 - E.inCubic(prog(t, 1.25, 1.6));
-  $("intro").style.display = t < 1.6 ? "block" : "none";
-  $("intro").style.opacity = io.toFixed(3);
-  $("introIcon").style.transform = `scale(${E.outBack(prog(t, 0.05, 0.5)).toFixed(3)})`;
-  word($("introA"), TX.introTopo, t, 0.25); word($("introB"), TX.app, t, 0.38, 70); word($("introC"), TX.introBase, t, 0.55);
-  // screens
-  const showA = t >= 1.35 && t < 8.25, showB = t >= 7.85 && t < 14.7;
-  $("scrA").style.display = showA ? "block" : "none";
-  $("scrB").style.display = showB ? "block" : "none";
-  const loads = [];
-  if (showA) { place($("scrA"), camA(t)); const f = frameA(t); if (!$("imgA").src.endsWith(f)) { $("imgA").src = f; loads.push($("imgA").decode().catch(() => {})); } }
-  if (showB) {
-    place($("scrB"), camB(t)); const f = frameB(t); if (!$("imgB").src.endsWith(f)) { $("imgB").src = f; loads.push($("imgB").decode().catch(() => {})); }
-    $("scrB").style.opacity = (1 - prog(t, 14.25, 14.7)).toFixed(3);
-  }
-  taps(t); mock(t); caption(t);
-  // end card
-  const e = t >= 14.3;
-  $("end").style.display = e ? "block" : "none";
-  if (e) {
-    $("endIcon").style.transform = `scale(${E.outBack(prog(t, 14.35, 14.8)).toFixed(3)})`;
-    word($("endA"), TX.app, t, 14.5, 70); word($("endB"), TX.fimBase, t, 14.7); word($("endC"), "(" + TX.fimNota + ")", t, 14.85);
-  }
-  $("fade").style.opacity = E.inOutSine(prog(t, 15.4, 15.97)).toFixed(3);
-  await Promise.all(loads);
+  let f, y;
+  if (t < A_END) { f = "frames/a_" + String(clamp(Math.floor(t * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg"; y = track(CAM_A, t); }
+  else if (t < B0) { f = "frames/b_0001.jpg"; y = 0; }
+  else { f = "frames/b_" + String(clamp(Math.floor((t - B0) * FR) + 1, 1, NB)).padStart(4, "0") + ".jpg"; y = 0; }
+  $("scr").style.transform = `translateY(${(-y).toFixed(1)}px)`;
+  sim(t - A_END);
+  const img = $("img");
+  if (!img.src.endsWith(f)) { img.src = f; await img.decode().catch(() => {}); }
 }
 
 async function ready() {
-  for (const w of [400, 500, 600, 700, 800]) await document.fonts.load(`${w} 40px Pop`);
+  for (const w of [400, 500]) await document.fonts.load(`${w} 40px Pop`);
   await document.fonts.ready;
   await Promise.all([...document.images].filter(i => i.src).map(i => i.decode().catch(() => {})));
 }
