@@ -1,3 +1,4 @@
 frames/
 output/*.wav
 output/*.log
+output/*.json

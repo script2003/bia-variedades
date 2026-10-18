@@ -1,19 +1,19 @@
 # Alpha Mouse Pro — Play Store (9:16)
 
-21,6 s, 1080 × 1920, 30 fps, sem som. Arquivo final: `output/alpha-mouse-pro-playstore.mp4`.
+19 s, 1080 × 1920, 30 fps. Arquivo final: `output/alpha-mouse-pro-playstore.mp4`.
 
-Só as gravações enviadas, na velocidade real e sem zoom:
+1. **Play Store** (`fonte/1-pesquisa.mp4`, velocidade real): um mouse entra (o primeiro quadro fica
+   parado 0,9 s para isso), clica em Pesquisa, na barra de busca e em cada letra de
+   "alpha mouse pro" no momento em que ela aparece na gravação, e depois na tecla de pesquisar.
+2. **Resultados**: o Alpha Mouse Pro aparece em 1º na lista (só dados reais: ícone, nome e
+   "Fera Alpha", com as letras recortadas da própria Play Store); a lista real desce uma linha.
+   O mouse clica nele.
+3. **Instalação** (`fonte/2-app.mp4`): o mouse clica em Instalar; Pendente… → 0–100% →
+   Instalando… são simulados por cima da página real, que depois aparece com o app instalado.
 
-1. **Play Store** (`fonte/1-pesquisa.mp4`): tela inicial, toque em Pesquisa, digitação de
-   "alpha mouse pro" e a lista de resultados.
-2. **Instalação**: na página do Alpha Mouse Pro (`fonte/2-app.mp4`), o botão Instalar →
-   Pendente… → 0–100% → Instalando… é **simulado** por cima da página real, porque a gravação
-   começa com o app já instalado. O texto "Instalar" usa as letras do próprio botão da Play Store.
-3. A página real com o app instalado (Desinstalar / Abrir).
-
-As gravações (1080 × 2400) são mais altas que 9:16, então o quadro de 1920 px sobe e desce
-seguindo onde a ação está (botão Pesquisa embaixo, barra de busca em cima, teclado, tecla de
-pesquisar, resultados). Os pontos da câmera ficam em `CAM_A` no `index.html`.
+A câmera (janela de 1920 px sobre a tela de 2400 px) segue o mouse, sem zoom.
+Clique: a seta afunda e solta uma onda branca. Som: só cliques de mouse (aperta e solta) e teclas
+de teclado mecânico, sintetizados em `sons.py`. Sem música.
 
 ```bash
 cd promo/unlock/playstore

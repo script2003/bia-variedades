@@ -10,15 +10,38 @@
   /* 9:16 window over the 1080 × 2400 recording, at real size (no zoom) */
   #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #121212; font-family: Pop, sans-serif; }
   #scr { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
-  #scr > img { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
+  #scr img.full { position: absolute; left: 0; top: 0; width: 1080px; height: 2400px; }
   .abs { position: absolute; }
-  #mock { position: absolute; inset: 0; display: none; }
-  .mask { -webkit-mask-repeat: no-repeat; -webkit-mask-position: center; mask-repeat: no-repeat; mask-position: center; }
+  .clip { position: absolute; left: 0; width: 1080px; overflow: hidden; }
+  .clip > img { position: absolute; left: 0; width: 1080px; height: 2400px; }
+  .mask { -webkit-mask-repeat: no-repeat; -webkit-mask-position: 0 0; mask-repeat: no-repeat; mask-position: 0 0; }
+  #mock, #results { position: absolute; inset: 0; display: none; }
+  #cursor { position: absolute; left: 0; top: 0; width: 58px; height: 76px; transform-origin: 4px 3px; filter: drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
+  .ring { position: absolute; left: 0; top: 0; width: 100px; height: 100px; margin: -50px 0 0 -50px; border-radius: 50%; display: none;
+    box-shadow: 0 0 0 5px rgba(255,255,255,.9), 0 0 24px 6px rgba(255,255,255,.35); }
+  .flash { position: absolute; left: 0; top: 0; width: 70px; height: 70px; margin: -35px 0 0 -35px; border-radius: 50%; display: none; background: rgba(255,255,255,.35); }
 </style>
 </head>
 <body>
 <div id="stage">
-  <div id="scr"><img id="img" alt="">
+  <div id="scr">
+    <img id="img" class="full" alt="">
+
+    <!-- results list with the Alpha Mouse Pro as the first result (real data only: icon, name, developer) -->
+    <div id="results">
+      <div class="clip" style="top:440px;height:1722px"><img id="imgList" style="top:-183px" alt=""></div>
+      <div id="row" class="clip" style="top:440px;height:257px">
+        <img id="imgRow" style="top:-440px" alt="">
+        <div class="abs" style="left:28px;top:28px;width:186px;height:190px;background:#121212"></div>
+        <div class="abs" style="left:228px;top:28px;width:722px;height:225px;background:#121212"></div>
+        <div id="rowContent" class="abs" style="inset:0">
+          <img class="abs" src="assets/icone-app.png" style="left:36px;top:39px;width:168px;height:168px;border-radius:40px">
+          <div class="abs mask" style="left:241px;top:62px;width:687px;height:52px;background:#e3e3e3;-webkit-mask-image:url(assets/txt-titulo-curto.png);mask-image:url(assets/txt-titulo-curto.png)"></div>
+          <div class="abs mask" style="left:241px;top:134px;width:180px;height:47px;background:#c4c7c5;-webkit-mask-image:url(assets/txt-fera-alpha.png);mask-image:url(assets/txt-fera-alpha.png)"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- install simulation over the real app page (the recording starts with the app already installed) -->
     <div id="mock">
       <div class="abs" style="left:28px;top:848px;width:1030px;height:138px;background:#121212"></div>
@@ -30,16 +53,20 @@
       </svg>
       <div id="mStatus" class="abs" style="left:326px;top:548px;font:400 38px Pop;color:#c4c7c5"></div>
       <div id="mInstall" class="abs" style="left:36px;top:857px;width:1008px;height:120px;border-radius:60px;background:#a8c4f7;overflow:hidden">
-        <div class="abs mask" style="inset:0;background:#052b6e;-webkit-mask-image:url(assets/txt-instalar.png);mask-image:url(assets/txt-instalar.png)"></div>
+        <div class="abs mask" style="inset:0;background:#052b6e;-webkit-mask-image:url(assets/txt-instalar.png);mask-image:url(assets/txt-instalar.png);-webkit-mask-position:center;mask-position:center"></div>
         <div id="mRipple" class="abs" style="width:300px;height:300px;margin:-150px 0 0 -150px;border-radius:50%;background:rgba(5,43,110,.18);left:504px;top:60px;transform:scale(0)"></div>
       </div>
       <div id="mBusy" class="abs" style="inset:0;display:none">
         <div id="mCancel" class="abs" style="left:36px;top:857px;width:485px;height:120px;border-radius:60px;box-sizing:border-box;border:3px solid #434545;display:grid;place-items:center;font:500 43px Pop;color:#a8c4f7"></div>
         <div class="abs" style="left:558px;top:857px;width:486px;height:120px;border-radius:60px;background:rgba(227,227,227,.12)">
-          <div class="abs mask" style="inset:0;background:rgba(227,227,227,.38);-webkit-mask-image:url(assets/txt-abrir.png);mask-image:url(assets/txt-abrir.png)"></div>
+          <div class="abs mask" style="inset:0;background:rgba(227,227,227,.38);-webkit-mask-image:url(assets/txt-abrir.png);mask-image:url(assets/txt-abrir.png);-webkit-mask-position:center;mask-position:center"></div>
         </div>
       </div>
     </div>
+
+    <div id="flash" class="flash"></div>
+    <div id="ring" class="ring"></div>
+    <svg id="cursor" viewBox="0 0 32 42"><path d="M3 2 L3 32 L10.5 25.5 L15.5 37 L21 34.5 L16 23.5 L26 23.5 Z" fill="#fff" stroke="#111" stroke-width="2.2" stroke-linejoin="round"/></svg>
   </div>
 </div>
 
@@ -48,45 +75,101 @@
 (() => {
 "use strict";
 const TX = window.TEXTOS, FR = 30;
-const NA = 357, NB = 159;                 // frames extracted at 30 fps
-const A_END = NA / FR;                     // recording 1: Play Store, search, results (real speed)
-const SIM = 4.35;                          // install simulation on the app page
-const B0 = A_END + SIM;                    // recording 2: installed page (real speed)
+const NA = 357, NB = 159;        // frames extracted at 30 fps
+const FREEZE = 0.9;              // first frame held while the mouse comes in
+const CUT = 8.5;                 // recording-1 time where the app page opens (after the click on the result)
+const S0 = FREEZE + CUT;         // install simulation starts
+const SIM = 4.35;
+const B0 = S0 + SIM;             // real installed page (recording 2)
 const DUR = B0 + NB / FR;
 const $ = id => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const prog = (t, a, b) => clamp((t - a) / (b - a));
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = x => -(Math.cos(Math.PI * x) - 1) / 2;
+const smooth = x => x * x * x * (x * (x * 6 - 15) + 10);   // smootherstep: soft start and stop
 const outCubic = x => 1 - Math.pow(1 - x, 3);
-function track(keys, t) {
-  if (t <= keys[0][0]) return keys[0][1];
-  for (let i = 1; i < keys.length; i++) {
-    if (t <= keys[i][0]) { const [t0, v0] = keys[i - 1], [t1, v1] = keys[i]; return lerp(v0, v1, ease(prog(t, t0, t1))); }
+
+// ---------- clicks (output time, x, y in screen pixels, kind) ----------
+const KEYS = { q: [66, 1710], w: [170, 1710], e: [274, 1710], r: [378, 1710], t: [482, 1710], y: [586, 1710], u: [690, 1710], i: [794, 1710], o: [898, 1710], p: [1002, 1710],
+  a: [120, 1860], s: [225, 1860], d: [330, 1860], f: [435, 1860], g: [540, 1860], h: [645, 1860], j: [750, 1860], k: [855, 1860], l: [960, 1860],
+  z: [225, 2010], x: [330, 2010], c: [435, 2010], v: [540, 2010], b: [645, 2010], n: [750, 2010], m: [855, 2010], " ": [540, 2160] };
+// moment each letter appears in recording 1 (measured on the search field)
+const TYPED = [["a", 2.567], ["l", 2.933], ["p", 3.2], ["h", 3.433], ["a", 3.667], [" ", 4.167], ["m", 4.567], ["o", 4.867], ["u", 5.133],
+  ["s", 5.4], ["e", 5.633], [" ", 6.167], ["p", 6.533], ["r", 6.7], ["o", 6.867]];
+const CLICKS = [
+  [FREEZE + 0.12, 540, 2232, "mouse"],   // "Pesquisa" tab
+  [FREEZE + 1.28, 380, 168, "mouse"],    // search bar
+  ...TYPED.map(([c, t]) => [FREEZE + t - 0.03, KEYS[c][0], KEYS[c][1] - 8, c === " " ? "space" : "key"]),
+  [FREEZE + 7.33, 981, 2160, "key"],     // search key
+  [FREEZE + 8.3, 430, 575, "mouse"],     // the Alpha Mouse Pro result
+  [S0 + 1.0, 560, 916, "mouse"],         // Instalar
+];
+window.CLICKS = CLICKS.map(c => ({ t: c[0], x: c[1], kind: c[3] }));   // read by the sound script (sons.py)
+
+// mouse path: arrive a little before each click, rest briefly, then glide to the next
+const PATH = [[0, 780, 1640]];
+for (const [t, x, y] of CLICKS) {
+  const prev = PATH[PATH.length - 1];
+  const travel = Math.min(0.75, Math.max(0.16, (t - prev[0]) * 0.8));
+  PATH.push([Math.max(prev[0] + 0.02, t - 0.05 - 0 * travel), x, y, t - 0.05 - travel]);
+  PATH.push([t + 0.06, x, y]);
+}
+PATH.push([S0 + 2.2, 650, 1120, S0 + 1.3]);
+function mouse(t) {
+  for (let i = 1; i < PATH.length; i++) {
+    const [t1, x1, y1, start] = PATH[i];
+    if (t <= t1) {
+      const [t0, x0, y0] = PATH[i - 1];
+      const a = Math.max(t0, start ?? t0);
+      const k = smooth(prog(t, a, t1));
+      // gentle arc so the movement does not look robotic
+      const dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy) || 1, bend = Math.sin(Math.PI * k) * Math.min(60, d * 0.07);
+      return [lerp(x0, x1, k) - dy / d * bend, lerp(y0, y1, k) + dx / d * bend];
+    }
   }
-  return keys[keys.length - 1][1];
+  const last = PATH[PATH.length - 1]; return [last[1], last[2]];
 }
 
-// camera: how far the 1920-px window is moved down the 2400-px screen (0 = top, 480 = bottom),
-// following where the action is in recording 1
-const CAM_A = [
-  [0.00, 480],  // Play Store home: bottom, where "Pesquisa" is tapped
-  [0.35, 480], [1.20, 0],    // up to the search bar
-  [1.85, 0], [2.30, 130],    // keyboard opens: search field + keyboard
-  [7.05, 130], [7.30, 480],  // down to the search key
-  [7.50, 480], [7.90, 0],    // results list from the top
-];
+// ---------- camera: offset of the 1920-px window on the 2400-px screen ----------
+const CAM = [[0, 480], [1.15, 480], [2.05, 0], [2.4, 0], [3.0, 130],
+  [4.85, 130], [5.0, 300], [5.2, 300], [5.45, 130], [6.85, 130], [7.0, 300], [7.2, 300], [7.45, 130],
+  [7.95, 130], [8.15, 300], [8.35, 300], [9.0, 0]];
+function cam(t) {
+  if (t >= S0) return 0;
+  for (let i = 1; i < CAM.length; i++) if (t <= CAM[i][0]) { const [t0, v0] = CAM[i - 1], [t1, v1] = CAM[i]; return lerp(v0, v1, ease(prog(t, t0, t1))); }
+  return CAM[CAM.length - 1][1];
+}
+
+// ---------- click effect: the arrow sinks, a white ring opens ----------
+function clickFx(t) {
+  let press = 0, ring = null;
+  for (const [ct, x, y, kind] of CLICKS) {
+    if (t >= ct - 0.05 && t < ct + 0.12) press = Math.max(press, Math.sin(Math.PI * prog(t, ct - 0.05, ct + 0.12)));
+    const k = prog(t, ct, ct + (kind === "mouse" ? 0.45 : 0.3));
+    if (k > 0 && k < 1) ring = { x, y, k, big: kind === "mouse" };
+  }
+  const r = $("ring"), f = $("flash");
+  if (ring) {
+    const s = (ring.big ? 0.3 + 1.1 * outCubic(ring.k) : 0.25 + 0.75 * outCubic(ring.k));
+    r.style.display = f.style.display = "block";
+    r.style.left = f.style.left = ring.x + "px"; r.style.top = f.style.top = ring.y + "px";
+    r.style.transform = `scale(${s.toFixed(3)})`; r.style.opacity = (1 - ring.k).toFixed(3);
+    f.style.transform = `scale(${(0.6 + 0.6 * ring.k).toFixed(3)})`; f.style.opacity = (Math.max(0, 1 - ring.k * 2.2)).toFixed(3);
+  } else r.style.display = f.style.display = "none";
+  return press;
+}
 
 function sim(t) {  // t = seconds since the simulation started
   const on = t >= 0 && t < SIM;
   $("mock").style.display = on ? "block" : "none";
   if (!on) return;
-  $("mock").style.opacity = (1 - prog(t, 4.1, 4.35)).toFixed(3);   // dissolves into the real installed page
+  $("mock").style.opacity = (1 - prog(t, 4.1, 4.35)).toFixed(3);
   const busy = t >= 1.1;
   $("mInstall").style.display = busy ? "none" : "block";
   $("mBusy").style.display = busy ? "block" : "none";
   if ($("mCancel").textContent !== TX.cancelar) $("mCancel").textContent = TX.cancelar;
-  const r = prog(t, 1.0, 1.3);   // touch ripple of the button
+  const r = prog(t, 1.0, 1.3);
   $("mRipple").style.transform = `scale(${(r * 6).toFixed(3)})`; $("mRipple").style.opacity = (r > 0 ? 1 - r : 0).toFixed(3);
   const ring = outCubic(prog(t, 1.1, 1.4)) * (1 - outCubic(prog(t, 3.85, 4.1)));
   $("mIcon").style.transform = `scale(${lerp(1, 0.72, ring).toFixed(4)})`;
@@ -103,16 +186,26 @@ function sim(t) {  // t = seconds since the simulation started
   $("mStatus").textContent = st;
 }
 
+const setSrc = (img, f, loads) => { if (!img.src.endsWith(f)) { img.src = f; loads.push(img.decode().catch(() => {})); } };
+
 async function renderAt(t) {
   t = clamp(t, 0, DUR - 1e-6);
-  let f, y;
-  if (t < A_END) { f = "frames/a_" + String(clamp(Math.floor(t * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg"; y = track(CAM_A, t); }
-  else if (t < B0) { f = "frames/b_0001.jpg"; y = 0; }
-  else { f = "frames/b_" + String(clamp(Math.floor((t - B0) * FR) + 1, 1, NB)).padStart(4, "0") + ".jpg"; y = 0; }
-  $("scr").style.transform = `translateY(${(-y).toFixed(1)}px)`;
-  sim(t - A_END);
-  const img = $("img");
-  if (!img.src.endsWith(f)) { img.src = f; await img.decode().catch(() => {}); }
+  const loads = [];
+  let f, rec = -1;
+  if (t < S0) { rec = Math.max(0, t - FREEZE); f = "frames/a_" + String(clamp(Math.floor(rec * FR) + 1, 1, NA)).padStart(4, "0") + ".jpg"; }
+  else if (t < B0) f = "frames/b_0001.jpg";
+  else f = "frames/b_" + String(clamp(Math.floor((t - B0) * FR) + 1, 1, NB)).padStart(4, "0") + ".jpg";
+  setSrc($("img"), f, loads);
+  // results: shift the real list down one row and put the Alpha Mouse Pro on top
+  const res = rec >= 7.55;
+  $("results").style.display = res ? "block" : "none";
+  if (res) { setSrc($("imgList"), f, loads); setSrc($("imgRow"), f, loads); $("rowContent").style.opacity = prog(rec, 7.55, 7.72).toFixed(3); }
+  $("scr").style.transform = `translateY(${(-cam(t)).toFixed(1)}px)`;
+  sim(t - S0);
+  const press = clickFx(t);
+  const [mx, my] = mouse(t);
+  $("cursor").style.transform = `translate(${(mx - 4).toFixed(1)}px, ${(my - 3).toFixed(1)}px) scale(${(1 - 0.16 * press).toFixed(3)})`;
+  await Promise.all(loads);
 }
 
 async function ready() {
