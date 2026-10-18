@@ -12,7 +12,8 @@
 3. **Instalação** (`fonte/2-app.mp4`): o mouse clica em Instalar; Pendente… → 0–100% →
    Instalando… são simulados por cima da página real, que depois aparece com o app instalado.
 
-A câmera (janela de 1920 px sobre a tela de 2400 px) segue o mouse, sem zoom.
+A câmera (janela de 1920 px sobre a tela de 2400 px) segue o mouse o tempo todo, sem zoom, com
+movimento de mola amortecida e um pouco de antecipação (`LOOKAHEAD`, `OMEGA` no `index.html`).
 Clique: a seta afunda e solta uma onda branca. Som (sem música): sintetizado em `sons.py`, modelado
 na referência de efeitos enviada (sem usar o áudio dela). O clique é um "toc" tonal de toque em
 tela, com batida em ~500 Hz e, 50 ms depois, uma batida grave em ~177 Hz. A digitação é um clique
