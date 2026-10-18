@@ -5,7 +5,7 @@ Fundo preto com grade branca em perspectiva no teto, que se afasta devagar (1ª 
 preto brilhante com azulejos fracos (2ª referência). O celular prateado fica parado no centro, apoiado
 no piso, com o reflexo dele logo abaixo, que vai sumindo. No reflexo a tela aparece como vidro escuro,
 para o modelo continuar funcionando com a remoção de croma.
-Detalhes de realismo: metal iluminado de cima, brilho nas laterais, chanfro polido, linhas de antena,
+Detalhes de realismo: grade do teto com linhas que afinam com a distância, brilho suave e névoa no horizonte; metal iluminado de cima, brilho nas laterais, chanfro polido, linhas de antena,
 botões com volume, borda do vidro pegando luz, câmera frontal em furo com reflexo de lente e sombra
 de contato no piso. A tela é verde puro (#00FF00).
 `output/previa.png` mostra um quadro.

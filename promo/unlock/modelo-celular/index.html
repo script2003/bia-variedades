@@ -25,19 +25,37 @@ const STEP = 0.15, LINE_EVERY = 2.5;   // one line passes every 2.5 s → seamle
 const CEIL = { hor: 420, K: 420, S: 347, bandEnd: 205 };
 function ceiling(t) {
   const phase = (t / LINE_EVERY) % 1, p = CEIL;
-  const fade = y => clamp((p.bandEnd - y) / 60);
+  const fade = y => clamp((p.bandEnd - y) / 70);
+  // lines across: thicker and brighter close to the camera, thin and dim far away
   for (let n = 0; n < 40; n++) {
     const z = 1 - STEP + (n + phase) * STEP, y = p.hor - p.K / z;
     if (y < -6 || y > p.bandEnd) continue;
-    const near = clamp(1.6 - z);
-    glowLine(0, y, W, y, 1.8 + 2.8 * near, `rgba(255,255,255,${(fade(y) * (0.6 + 0.4 * near)).toFixed(3)})`);
+    const near = clamp(1.6 - z), a = fade(y) * (0.5 + 0.5 * near);
+    bloomLine(0, y, W, y, 1.2 + 3.4 * near, a);
   }
-  const g = ctx.createLinearGradient(0, p.bandEnd, 0, 0);
-  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.35, "rgba(255,255,255,.7)"); g.addColorStop(1, "rgba(255,255,255,1)");
+  // lines along: tapered quads, wide at the top edge and fine toward the horizon
   for (let k = -8; k < 8; k++) {
     const xAt = y => W / 2 + (k + 0.5) * p.S * ((p.hor - y) / p.K);
-    glowLine(xAt(p.bandEnd), p.bandEnd, xAt(0), 0, 3.0, g);
+    const g = ctx.createLinearGradient(0, p.bandEnd, 0, 0);
+    g.addColorStop(0, "rgba(232,240,255,0)"); g.addColorStop(0.3, "rgba(232,240,255,.55)"); g.addColorStop(1, "rgba(240,245,255,1)");
+    const x0 = xAt(p.bandEnd), x1 = xAt(0), w0 = 0.6, w1 = 2.4;
+    ctx.save(); ctx.shadowColor = "rgba(210,225,255,.6)"; ctx.shadowBlur = 12; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(x0 - w0, p.bandEnd); ctx.lineTo(x0 + w0, p.bandEnd); ctx.lineTo(x1 + w1, 0); ctx.lineTo(x1 - w1, 0); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
+  // atmospheric haze where the grid meets the dark (it hides the far end, like a real room)
+  const hz = ctx.createLinearGradient(0, p.bandEnd - 90, 0, p.bandEnd + 30);
+  hz.addColorStop(0, "rgba(0,0,0,0)"); hz.addColorStop(0.55, "rgba(18,20,26,.55)"); hz.addColorStop(0.8, "rgba(10,11,14,.35)"); hz.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = hz; ctx.fillRect(0, p.bandEnd - 90, W, 120);
+}
+// soft bloom (wide, faint) under a crisp core, slightly cool white
+function bloomLine(x0, y0, x1, y1, w, a) {
+  if (a <= 0.01) return;
+  ctx.save(); ctx.lineCap = "round";
+  ctx.strokeStyle = `rgba(200,215,255,${(a * 0.18).toFixed(3)})`; ctx.lineWidth = w * 5; ctx.filter = "blur(3px)";
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.filter = "none";
+  ctx.strokeStyle = `rgba(240,245,255,${a.toFixed(3)})`; ctx.lineWidth = w; ctx.shadowColor = "rgba(220,230,255,.5)"; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
 }
 function glowLine(x0, y0, x1, y1, w, style, c = ctx, glow = 10) {
   c.save(); c.strokeStyle = style; c.lineCap = "round";
@@ -108,10 +126,10 @@ function drawFloor(c) {
   for (let n = 0; n < 30; n++) {
     const z = 1 + n * 0.32, y = FLOOR.hor + FLOOR.K / z;
     if (y < FLOOR.top) break;
-    glowLine(0, y, W, y, 1.6, `rgba(255,255,255,${(0.09 * fade(y)).toFixed(3)})`, c, 0);
+    glowLine(0, y, W, y, 1.6, `rgba(255,255,255,${(0.13 * fade(y)).toFixed(3)})`, c, 0);
   }
   g = c.createLinearGradient(0, FLOOR.top, 0, H);
-  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,.1)");
+  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,.15)");
   for (let k = -6; k < 6; k++) {
     const xAt = y => W / 2 + (k + 0.5) * FLOOR.S * ((y - FLOOR.hor) / FLOOR.K);
     glowLine(xAt(FLOOR.top), FLOOR.top, xAt(H), H, 1.6, g, c, 0);
@@ -125,7 +143,7 @@ function drawReflection(c) {
   rc.save(); rc.translate(0, 2 * BASE); rc.scale(1, -1); rc.filter = "blur(1.5px)"; rc.drawImage(ph, 0, 0); rc.restore();
   rc.globalCompositeOperation = "destination-in";
   const g = rc.createLinearGradient(0, BASE, 0, BASE + 320);
-  g.addColorStop(0, "rgba(0,0,0,.6)"); g.addColorStop(0.45, "rgba(0,0,0,.22)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  g.addColorStop(0, "rgba(0,0,0,.72)"); g.addColorStop(0.45, "rgba(0,0,0,.28)"); g.addColorStop(1, "rgba(0,0,0,0)");
   rc.fillStyle = g; rc.fillRect(0, BASE, W, H - BASE);
   rc.clearRect(0, 0, W, BASE);
   c.drawImage(r, 0, 0);
