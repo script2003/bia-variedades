@@ -25,3 +25,14 @@ cd promo/unlock/modelo-celular
 NODE_PATH=$(npm root -g) node render.cjs
 ```
 Cores e medidas ficam em `index.html` (`GREEN`, `PH`, `PLANES`, `STEP`, `LINE_EVERY`).
+
+## Vídeo da Play Store dentro do celular
+
+`output/alpha-mouse-pro-no-celular.mp4`: o vídeo do Alpha Mouse Pro (13,6 s, com os sons de clique e
+digitação) dentro do celular deste modelo. Usa a tela inteira da gravação (1080 × 2400, sem o corte
+9:16; `../playstore/index.html?full`), com os cantos arredondados e sem sobra de verde.
+
+```bash
+cd promo/unlock/modelo-celular
+NODE_PATH=$(npm root -g) node render-com-video.cjs
+```

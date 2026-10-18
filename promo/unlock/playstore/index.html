@@ -160,7 +160,11 @@ const CAM_TRACK = (() => {
   }
   return out;
 })();
+// ?full shows the whole 1080 × 2400 phone screen (for the phone mockup), so the camera does not move
+const FULL = new URLSearchParams(location.search).has("full");
+if (FULL) document.getElementById("stage").style.height = "2400px";
 function cam(t) {
+  if (FULL) return 0;
   const f = t * CAM_HZ, i = Math.floor(f);
   return lerp(CAM_TRACK[Math.min(i, CAM_TRACK.length - 1)], CAM_TRACK[Math.min(i + 1, CAM_TRACK.length - 1)], f - i);
 }
