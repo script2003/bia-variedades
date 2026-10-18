@@ -35,7 +35,7 @@ const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
     "-y", "-v", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "mjpeg", "-i", "-",
     "-i", sons, "-map", "0:v", "-map", "1:a",
     "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-profile:v", "high",
-    "-r", String(FPS), "-g", String(FPS), "-c:a", "aac", "-b:a", "192k", "-af", "alimiter=level_in=3:limit=0.84:attack=0.3:release=25:level=false", "-ar", "44100", "-shortest", "-movflags", "+faststart", file,
+    "-r", String(FPS), "-g", String(FPS), "-c:a", "aac", "-b:a", "192k", "-af", "alimiter=level_in=4.2:limit=0.6:attack=0.3:release=25:level=false", "-ar", "44100", "-shortest", "-movflags", "+faststart", file,
   ], { stdio: ["pipe", "inherit", "inherit"] });
   const done = new Promise((res, rej) => ff.on("close", c => (c ? rej(new Error("ffmpeg " + c)) : res())));
   for (let i = 0; i < frames; i++) {
